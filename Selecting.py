@@ -10,7 +10,7 @@ import pandas as pd
 
 """
 基于NGAWest2地震动数据库的选波程序  
-开发者：列文琛  
+开发者：Vincent  
 日期：2024年2月4日
 """
 
