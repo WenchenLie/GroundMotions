@@ -12,6 +12,7 @@ import pandas as pd
 基于NGAWest2地震动数据库的选波程序  
 开发者：Vincent  
 日期：2024年2月4日
+更新：2024.03.13 增加输出缩放后反应谱
 """
 
 class Selecting:
@@ -533,8 +534,10 @@ class Selecting:
                                    'earthquake_name', 'magnitude', 'mechanism', 'station',
                                    'Vs30 (m/s)', 'year', PG_AVD, 'dt', 'NPTS', 'scale factor', 'error'])
         # Ta, Tb = min(self.T_targ0), max(self.T_targ0)
-        df_spec = pd.DataFrame(data=self.T_spec, columns=['T (s)'])
+        df_spec = pd.DataFrame(data=self.T_spec, columns=['T (s)'])  # 未缩放反应谱
+        df_scaled_spec = pd.DataFrame(data=self.T_spec, columns=['T (s)'])  # 缩放后反应谱
         data_spec_sum = np.zeros(len(self.T_spec))
+        data_scaled_spec_sum = np.zeros(len(self.T_spec))
         for i, file_stem in enumerate(files):
             file = file_stem + suffix
             ds_data = f_data[file]
@@ -576,8 +579,11 @@ class Selecting:
                     year, peak, dt, NPTS, SF, error]
             df_info.loc[len(df_info.index)] = line
             data_spec = f_spec[file_stem][:]
+            data_scaled_spec = f_spec[file_stem][:] * SF
             data_spec_sum += data_spec
+            data_scaled_spec_sum += data_scaled_spec
             df_spec[f'No. {i+1}'] = data_spec
+            df_scaled_spec[f'No. {i+1}'] = data_scaled_spec
             earthquake_name_to_file = earthquake_name.replace('/', '_')  # 文件名不得出现"/"、"\"
             earthquake_name_to_file = earthquake_name_to_file.replace('\\', '_')
             if write_unscaled_record:
@@ -587,9 +593,12 @@ class Selecting:
             if write_scaled_records:
                 np.savetxt(output_dir/'缩放后地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data_scaled)
         data_spec_mean = data_spec_sum / len(files)
+        data_scaled_spec_mean = data_scaled_spec_sum / len(files)
         df_spec['Mean'] = data_spec_mean
+        df_scaled_spec['Mean'] = data_scaled_spec_mean
         df_info.to_csv(output_dir/'地震动信息.csv', index=None)
-        df_spec.to_csv(output_dir/'反应谱.csv', index=False)
+        df_spec.to_csv(output_dir/'未缩放反应谱.csv', index=False)
+        df_scaled_spec.to_csv(output_dir/'缩放后反应谱.csv', index=False)
         f_info.close()
         f_spec.close()
         f_data.close()
