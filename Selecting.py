@@ -14,6 +14,7 @@ from typing import Dict, Tuple
 开发者：Vincent  
 日期：2024年2月4日
 更新：2024.03.13 增加输出缩放后反应谱
+更新：2024.03.31 增加输出反应谱对比图、各个匹配规则的误差值、选波参数的记录文档
 """
 
 class Selecting:
