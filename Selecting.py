@@ -435,7 +435,7 @@ class Selecting:
                 del file_error[file]
         if self.range_PGA:
             PGA_a, PGA_b = self.range_PGA
-            for file in file_SF.keys():
+            for file in file_SF.copy().keys():
                 PGA = file_PGA[file]
                 if not PGA_a <= PGA <= PGA_b:
                     del file_SF[file]
@@ -692,18 +692,18 @@ class Selecting:
 
 
 if __name__ == "__main__":
-    file_acc = r'F:\NGAWest2\Acceleration.hdf5'
-    file_vel = r'F:\NGAWest2\Velocity.hdf5'
-    file_disp = r'F:\NGAWest2\Displacement.hdf5'
-    file_spec = r'F:\NGAWest2\Spectra.hdf5'
-    file_info = r'F:\NGAWest2\Info.hdf5'
+    file_acc = r'G:\NGAWest2\Acceleration.hdf5'
+    file_vel = r'G:\NGAWest2\Velocity.hdf5'
+    file_disp = r'G:\NGAWest2\Displacement.hdf5'
+    file_spec = r'G:\NGAWest2\Spectra.hdf5'
+    file_info = r'G:\NGAWest2\Info.hdf5'
     selector = Selecting()
     selector.import_files(file_acc, file_vel, file_disp, file_spec, file_info)
-    selector.target_spectra('F:\6-Story-RCF-OS\STKOmodel\SLE谱.txt')
+    selector.target_spectra('DBE谱.txt')
     selector.scaling_approach('a')
-    selector.matching_rules(rules=['full', 'b', 'c'], para=[None, 1, (0.1, 2)], weight=[7, 3, 3])
-    selector.constrain_range(N_events=2, scale_factor=(3, 10), component=['H1'])
-    selected_records, records_info = selector.run(7)
+    selector.matching_rules(rules=['c', 'b', 'b'], para=[(0.6, 1.8), 4.121, 4.09], weight=[1.5, 1.5, 1.5])
+    selector.constrain_range(N_events=3, magnitude=(5.5, 8.5), Rjb=(1, 35), PGA=(0.1, 1.6), component=['H1', 'H2'])
+    selected_records, records_info = selector.run(200)
     selector.extract_records(r'F:\6-Story-RCF-OS\STKOmodel\选波',
                              files=selected_records, file_SF_error=records_info)
     # selector.check_database()
