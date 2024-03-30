@@ -6,6 +6,7 @@ import hashlib
 import h5py
 from scipy.interpolate import interp1d
 import pandas as pd
+from typing import Dict, Tuple
 
 
 """
@@ -51,6 +52,7 @@ class Selecting:
         self.range_RSN = None
         self.range_component = ['H1', 'H2', 'V']
         self.norm_weight = None
+        self.selecting_text = ''
 
     def import_files(self, *files: Path | str):
         """导入hdf5文件"""
@@ -131,24 +133,24 @@ class Selecting:
         """
         self.approach = approach
         self.para_scaling = para
-        print('反应谱缩放方式：', end='')
+        self._write('反应谱缩放方式：', end='')
         match approach:
             case 'a':
-                print('按PGA缩放')
+                self._write('按PGA缩放')
                 if para:
-                    print(f'(已指定PGA={para}g)')
+                    self._write(f'(已指定PGA={para}g)')
             case 'b':
                 if type(para) is not tuple:
-                    print(f'按Sa({para})缩放')
+                    self._write(f'按Sa({para})缩放')
                 else:
-                    print(f'按Sa({para[0]})缩放')
-                    print(f'(已指定a({para[0]})={para[1]}g)')
+                    self._write(f'按Sa({para[0]})缩放')
+                    self._write(f'(已指定a({para[0]})={para[1]}g)')
             case 'c':
-                print(f'按{para[0]}~{para[1]}周期范围进行缩放(令RSME最小)')
+                self._write(f'按{para[0]}~{para[1]}周期范围进行缩放(令RSME最小)')
             case 'd':
-                print(f'按{para[0]}~{para[1]}周期范围内的Sa_avg进行缩放(几何平均数)')
+                self._write(f'按{para[0]}~{para[1]}周期范围内的Sa_avg进行缩放(几何平均数)')
             case 'e':
-                print(f'指定缩放系数({para})')
+                self._write(f'指定缩放系数({para})')
 
 
     def matching_rules(self, rules: list[str], para: list[float | tuple], weight: list=None):
@@ -182,19 +184,20 @@ class Selecting:
         self.norm_weight = [i / sum(weight) for i in weight]
         if len(rules) != len(para):
             raise ValueError('【Error】参数rules和para的长度应一致')
-        print('反应谱的匹配规则：')
+        self._write('反应谱的匹配规则：')
         for i, rule in enumerate(rules):
             match rule:
                 case 'full':
-                    print(f'({i+1}) 按目标谱全周期范围的RSME值进行匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按目标谱全周期范围的RSME值进行匹配，权重={weight[i]}')
                 case 'a':
-                    print(f'({i+1}) 按PGA匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按PGA匹配，权重={weight[i]}')
                 case 'b':
-                    print(f'({i+1}) 按Sa({para})匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按Sa({para})匹配，权重={weight[i]}')
                 case 'c':
-                    print(f'({i+1}) 按{para[0]}~{para[1]}周期范围的RSME值进行匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按{para[0]}~{para[1]}周期范围的RSME值进行匹配，权重={weight[i]}')
                 case 'd':
-                    print(f'({i+1}) 按{para[0]}~{para[1]}周期范围的Sa_avg值(几何平均数)进行匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按{para[0]}~{para[1]}周期范围的Sa_avg值(几何平均数)进行匹配，权重={weight[i]}')
+
 
     def constrain_range(self, scale_factor: tuple=None, PGA: tuple=None, magnitude: tuple=None, Rjb: tuple=None, Rrup: tuple=None,
                         vs30: tuple=None, D5_95: tuple=None, strike_slip: str='all', pulse: str | bool='all', N_events: int=None,
@@ -256,8 +259,9 @@ class Selecting:
         f_info = h5py.File(self.file_info, 'r')
         # 1 初步筛选
         for i, item in enumerate(f_info):
-            # if i == 1000:
-            #     break  # TODO for test
+            if i == 1000:
+                print(f' --------------- 调试模式，只考虑数据库中前{i}条地震波 --------------- ')
+                break  # TODO for test
             print(f'  {int(i/len(f_info)*100)}%   \r', end='')
             ds = f_info[item]
             H1_file = ds.attrs['H1_file']
@@ -376,6 +380,7 @@ class Selecting:
                 raise ValueError('【Error】参数approach错误')
             # 3 计算匹配分数 (缩放后值-目标谱值)/(目标谱值)
             error = 0  # 误差
+            error_ls = []
             Sa *= SF  # 当前地震动缩放后的反应谱
             for j, rule in enumerate(self.rules):
                 weight = self.norm_weight[j]
@@ -387,22 +392,26 @@ class Selecting:
                     Sa_targ_list = self.Sa_targ[(Ta<=self.T_targ) & (self.T_targ<=Tb)]
                     NRMSE = self._RMSE(Sa_spec_list, Sa_targ_list) / np.mean(Sa_targ_list)
                     error += NRMSE * weight
+                    error_ls.append(NRMSE)
                 elif rule == 'a':
                     Ta = 0
                     Sa_spec_0 = self._get_y(T, Sa, Ta)
                     Sa_targ_0 = self._get_y(self.T_targ, self.Sa_targ, Ta)
                     error += abs(Sa_spec_0 - Sa_targ_0) / Sa_targ_0 * weight
+                    error_ls.append((Sa_spec_0 - Sa_targ_0) / Sa_targ_0)
                 elif rule == 'b':
                     Ta = para
                     Sa_spec_0 = self._get_y(T, Sa, Ta)
                     Sa_targ_0 = self._get_y(self.T_targ, self.Sa_targ, Ta)
                     error += abs(Sa_spec_0 - Sa_targ_0) / Sa_targ_0 * weight
+                    error_ls.append((Sa_spec_0 - Sa_targ_0) / Sa_targ_0)
                 elif rule == 'c':
                     Ta, Tb = para
                     Sa_spec_list = Sa[(Ta<=T) & (T<=Tb)]
                     Sa_targ_list = self.Sa_targ[(Ta<=self.T_targ) & (self.T_targ<=Tb)]
                     NRMSE = self._RMSE(Sa_spec_list, Sa_targ_list) / np.mean(Sa_targ_list)
                     error += NRMSE * weight
+                    error_ls.append(NRMSE)
                 elif rule == 'd':
                     Ta, Tb = para
                     Sa_spec_list = Sa[(Ta<=T) & (T<=Tb)]
@@ -410,10 +419,11 @@ class Selecting:
                     Sa_spec_avg = self._geometric_mean(Sa_spec_list)
                     Sa_targ_avg = self._geometric_mean(Sa_targ_list)
                     error += abs(Sa_spec_avg - Sa_targ_avg) / Sa_targ_avg * weight
+                    error_ls.append((Sa_spec_avg - Sa_targ_avg) / Sa_targ_avg)
                 else:
                     raise ValueError('【Error】参数rule错误')
             file_SF[file] = SF
-            file_error[file] = error
+            file_error[file] = (error, error_ls)
         # 4 筛选缩放系数，地震动事件数量，PGA
         if self.range_scale_factor:
             SF_a, SF_b = self.range_scale_factor
@@ -441,9 +451,9 @@ class Selecting:
                     del file_SF[file]
                     del file_error[file]
         if len(file_SF) < number:
-            print(f'【Warning】符合条件的地震动数量({len(file_SF)})小于期望值({number})')
+            self._write(f'【Warning】符合条件的地震动数量({len(file_SF)})小于期望值({number})')
             number = len(file_SF)
-        files_selection = sorted(file_error, key=lambda k: file_error[k])[:number]  # 选波结果（带排列）
+        files_selection = sorted(file_error, key=lambda k: file_error[k][0])[:number]  # 选波结果（带排列）
         # 绘制反应谱
         f_accec = h5py.File(self.file_accec, 'r')
         Sa_sum = np.zeros(len(T))
@@ -454,27 +464,26 @@ class Selecting:
             plt.plot(T, Sa, color='#A6A6A6', label=label)
             if label:
                 label = None
-        plt.plot(self.T_targ0, self.Sa_targ0, label='target', color='black', lw=3)
-        plt.plot(T, Sa_sum / len(files_selection), color='red', label='mean', lw=3)
+        plt.plot(self.T_targ0, self.Sa_targ0, label='Target', color='black', lw=3)
+        plt.plot(T, Sa_sum / len(files_selection), color='red', label='Mean', lw=3)
         plt.xlim(min(self.T_targ0), max(self.T_targ0))
         plt.title('Selected records')
         plt.xlabel('T [s]')
         plt.ylabel('Sa [g]')
         plt.legend()
-        print('选波完成，请查看反应谱曲线')
-        plt.show()
         f_info.close()
         f_spec.close()
         f_accec.close()
         file_SF_error = {}  # {地震名: (缩放系数, 匹配误差)}
         for file in files_selection:
             SF = file_SF[file]
-            error = file_error[file]
-            file_SF_error[file] = (SF, error)
+            error, error_ls = file_error[file][0], file_error[file][1]
+            file_SF_error[file] = (SF, error, error_ls)
         return files_selection, file_SF_error
 
+
     def extract_records(self, output_dir: str | Path, type_: str='A', RSN: int=None, RSN_list: list[int]=None,
-                        RSN_range: list[int, int]=None, files: list=[], file_SF_error: dict={},
+                        RSN_range: list[int, int]=None, files: list=[], file_SF_error: Dict[str, Tuple[float, float, list]]={},
                         write_unscaled_record: bool=True, write_norm_record: bool=True, write_scaled_records: bool=True):
         """提取地震动数据
 
@@ -495,6 +504,9 @@ class Selecting:
         output_dir = Path(output_dir)
         if not output_dir.exists():
             os.makedirs(output_dir)
+        plt.savefig(output_dir/'反应谱-规范谱对比.jpg', dpi=600)
+        print('选波完成，请查看反应谱曲线')
+        plt.show()
         if write_unscaled_record:
             self._new_folder(output_dir/'未缩放地震动')
         if write_norm_record:
@@ -527,12 +539,12 @@ class Selecting:
             for RSN__ in RSN_list_:
                 files.extend(self._extract_one_RSN(RSN__, f_info))
         # 读取数据
-        df_info = pd.DataFrame(data=None,
-                          columns=['No.', 'RSN', 'component', 'Rjb (km)', 'R_rup (km)',
-                                   'Tp-pluse (s)', 'arias Intensity (m/s)',
-                                   '5-75% Duration (s)', '5-95% Duration (s)',
-                                   'earthquake_name', 'magnitude', 'mechanism', 'station',
-                                   'Vs30 (m/s)', 'year', PG_AVD, 'dt', 'NPTS', 'scale factor', 'error'])
+        df_info_columns = ['No.', 'RSN', 'component', 'Rjb (km)', 'R_rup (km)','Tp-pluse (s)',
+                           'arias Intensity (m/s)','5-75% Duration (s)', '5-95% Duration (s)',
+                           'earthquake_name', 'magnitude', 'mechanism', 'station','Vs30 (m/s)',
+                           'year', PG_AVD, 'dt', 'NPTS', 'scale factor', 'Norm. error']
+        df_info_columns += [f'error_{i}' for i in self.rules]
+        df_info = pd.DataFrame(data=None, columns=df_info_columns)
         # Ta, Tb = min(self.T_targ0), max(self.T_targ0)
         df_spec = pd.DataFrame(data=self.T_spec, columns=['T (s)'])  # 未缩放反应谱
         df_scaled_spec = pd.DataFrame(data=self.T_spec, columns=['T (s)'])  # 缩放后反应谱
@@ -560,11 +572,10 @@ class Selecting:
             vs30 = ds_info.attrs['vs30']
             year = ds_info.attrs['year']
             if file_stem in file_SF_error.keys():
-                SF = file_SF_error[file_stem][0]
-                error = file_SF_error[file_stem][1]
+                SF, error, error_ls = file_SF_error[file_stem]
                 data_scaled = data * SF
             else:
-                SF, error = '-', '-'
+                SF, error, error_ls = '-', '-', []
                 data_scaled = data
             if ds_info.attrs['H1_file'] == file_stem:
                 component = 'H1'
@@ -576,7 +587,7 @@ class Selecting:
                 raise ValueError('【Error】1')
             line = [i+1, RSN, component, Rjb, Rrup, Tp, arias, D_5_75, D_5_95,
                     earthquake_name, magnitude, mechanism, station, vs30,
-                    year, peak, dt, NPTS, SF, error]
+                    year, peak, dt, NPTS, SF, error, *error_ls]
             df_info.loc[len(df_info.index)] = line
             data_spec = f_spec[file_stem][:]
             data_scaled_spec = f_spec[file_stem][:] * SF
@@ -599,6 +610,8 @@ class Selecting:
         df_info.to_csv(output_dir/'地震动信息.csv', index=None)
         df_spec.to_csv(output_dir/'未缩放反应谱.csv', index=False)
         df_scaled_spec.to_csv(output_dir/'缩放后反应谱.csv', index=False)
+        with open(output_dir/'选波参数设置.txt', 'w') as f:
+            f.write(self.selecting_text)
         f_info.close()
         f_spec.close()
         f_data.close()
@@ -609,7 +622,7 @@ class Selecting:
         ds_name = f'RSN{RSN}'
         RSN_files = []
         if ds_name not in f_info:
-            print(f'【Warning】数据库缺少RSN{RSN}')
+            self._write(f'【Warning】数据库缺少RSN{RSN}')
         elif f_info[ds_name].attrs['H1_file'] != '-':
             RSN_files.append(f_info[ds_name].attrs['H1_file'])
         elif f_info[ds_name].attrs['H2_file'] != '-':
@@ -617,6 +630,12 @@ class Selecting:
         elif f_info[ds_name].attrs['Vertical_file'] != '-':
             RSN_files.append(f_info[ds_name].attrs['Vertical_file'])
         return RSN_files
+
+
+    def _write(self, text: str, end='\n'):
+        print(text)
+        self.selecting_text += text + end
+
 
     @staticmethod
     def _check_file(file_path: str | Path):
@@ -689,6 +708,7 @@ class Selecting:
         peak = max(abs(data))
         data_norm = data / peak
         return data_norm
+    
 
 
 if __name__ == "__main__":
@@ -699,10 +719,10 @@ if __name__ == "__main__":
     file_info = r'G:\NGAWest2\Info.hdf5'
     selector = Selecting()
     selector.import_files(file_acc, file_vel, file_disp, file_spec, file_info)
-    selector.target_spectra('DBE谱.txt')
+    selector.target_spectra('潮州项目DBE谱.txt')
     selector.scaling_approach('a')
     selector.matching_rules(rules=['c', 'b', 'b'], para=[(0.6, 1.8), 4.121, 4.09], weight=[1.5, 1.5, 1.5])
-    selector.constrain_range(N_events=3, magnitude=(5.5, 8.5), Rjb=(1, 35), PGA=(0.1, 1.6), component=['H1', 'H2'])
+    selector.constrain_range(N_events=3, magnitude=(5.5, 8.5), Rjb=(1, 35), PGA=(0.01, 1.6), component=['H1', 'H2'])
     selected_records, records_info = selector.run(200)
     selector.extract_records(r'选波', files=selected_records, file_SF_error=records_info)
     # selector.check_database()
