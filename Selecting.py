@@ -259,9 +259,9 @@ class Selecting:
         f_info = h5py.File(self.file_info, 'r')
         # 1 初步筛选
         for i, item in enumerate(f_info):
-            if i == 1000:
-                print(f' --------------- 调试模式，只考虑数据库中前{i}条地震波 --------------- ')
-                break  # TODO for test
+            # if i == 1000:
+            #     print(f' --------------- 调试模式，只考虑数据库中前{i}条地震波 --------------- ')
+            #     break  # TODO for test
             print(f'  {int(i/len(f_info)*100)}%   \r', end='')
             ds = f_info[item]
             H1_file = ds.attrs['H1_file']
