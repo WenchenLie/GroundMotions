@@ -704,8 +704,7 @@ if __name__ == "__main__":
     selector.matching_rules(rules=['c', 'b', 'b'], para=[(0.6, 1.8), 4.121, 4.09], weight=[1.5, 1.5, 1.5])
     selector.constrain_range(N_events=3, magnitude=(5.5, 8.5), Rjb=(1, 35), PGA=(0.1, 1.6), component=['H1', 'H2'])
     selected_records, records_info = selector.run(200)
-    selector.extract_records(r'F:\6-Story-RCF-OS\STKOmodel\选波',
-                             files=selected_records, file_SF_error=records_info)
+    selector.extract_records(r'选波', files=selected_records, file_SF_error=records_info)
     # selector.check_database()
 
 
