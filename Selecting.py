@@ -15,6 +15,7 @@ from typing import Dict, Tuple
 日期：2024年2月4日
 更新：2024.03.13 增加输出缩放后反应谱
 更新：2024.03.31 增加输出反应谱对比图、各个匹配规则的误差值、选波参数的记录文档
+更新：2024.04.11 优化了梯度下降法的初值计算方法
 """
 
 class Selecting:
@@ -176,7 +177,7 @@ class Selecting:
             `scaling_approach`方法中选用的`approach`参数不得作为该方法的`rules`参数
             （这表示之前定义的缩放方法不得用于判断反应谱匹配程度）
         """
-        if self.approach in rules:
+        if (self.approach in rules) and (self.approach not in ['c', 'd']):
             raise ValueError(f'【Error】地震动缩放方法("{self.approach}")不得再次作为匹配规则！')
         self.rules = rules
         self.para_match = para
@@ -193,11 +194,11 @@ class Selecting:
                 case 'a':
                     self._write(f'({i+1}) 按PGA匹配，权重={weight[i]}')
                 case 'b':
-                    self._write(f'({i+1}) 按Sa({para})匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按Sa({para[i]})匹配，权重={weight[i]}')
                 case 'c':
-                    self._write(f'({i+1}) 按{para[0]}~{para[1]}周期范围的RSME值进行匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按{para[i][0]}~{para[i][1]}周期范围的RSME值进行匹配，权重={weight[i]}')
                 case 'd':
-                    self._write(f'({i+1}) 按{para[0]}~{para[1]}周期范围的Sa_avg值(几何平均数)进行匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按{para[i][0]}~{para[i][1]}周期范围的Sa_avg值(几何平均数)进行匹配，权重={weight[i]}')
 
 
     def constrain_range(self, scale_factor: tuple=None, PGA: tuple=None, magnitude: tuple=None, Rjb: tuple=None, Rrup: tuple=None,
@@ -359,11 +360,11 @@ class Selecting:
                 SF = Sa_a / Sa_spec
             elif self.approach == 'c':
                 Ta, Tb = self.para_scaling
-                init_SF = 1.0  # 初始缩放系数
                 learning_rate = 0.01  # 学习率
-                num_iterations = 100  # 迭代次数
+                num_iterations = 1000  # 迭代次数
                 Sa_spec_list = Sa[(Ta<=T) & (T<=Tb)]  # 当前值
                 Sa_targ_list = self.Sa_targ[(Ta<=self.T_targ) & (self.T_targ<=Tb)]  # 目标值
+                init_SF = np.mean(Sa_targ_list) / np.mean(Sa_spec_list)  # 初始缩放系数
                 SF = self._gradient_descent(Sa_spec_list, Sa_targ_list, init_SF, learning_rate, num_iterations)
             elif self.approach == 'd':
                 if len(self.para_scaling) == 2:
@@ -694,6 +695,12 @@ class Selecting:
     def _RMSE(y1, y2):
         """计算均方根值"""
         result = np.sqrt(sum((y1 - y2) ** 2) / len(y1))
+        # if sum(y2 - y1) > 0:
+        #     sgn = 1
+        # elif sum(y2 - y1) < 0:
+        #     sgn = -1
+        # else:
+        #     sgn = 1
         return result
 
     @staticmethod
@@ -720,13 +727,15 @@ if __name__ == "__main__":
     file_info = r'G:\NGAWest2\Info.hdf5'
     selector = Selecting()
     selector.import_files(file_acc, file_vel, file_disp, file_spec, file_info)
-    selector.target_spectra('潮州项目DBE谱.txt')
-    selector.scaling_approach('a')
-    selector.matching_rules(rules=['c', 'b', 'b'], para=[(0.6, 1.8), 4.121, 4.09], weight=[1.5, 1.5, 1.5])
-    selector.constrain_range(N_events=3, magnitude=(5.5, 8.5), Rjb=(1, 35), PGA=(0.01, 1.6), component=['H1', 'H2'])
-    selected_records, records_info = selector.run(200)
-    selector.extract_records(r'选波', files=selected_records, file_SF_error=records_info)
+    selector.target_spectra('DBE谱J.txt')
+    selector.scaling_approach('c', para=(0.1, 2))
+    selector.matching_rules(rules=['c'], para=[(0.1, 2)], weight=[1])
+    selector.constrain_range(N_events=5, scale_factor=(0.2, 10), component=['H1'])
+    selected_records, records_info = selector.run(35)
+    selector.extract_records('选波', files=selected_records, file_SF_error=records_info)
     # selector.check_database()
+
+
 
 
 
