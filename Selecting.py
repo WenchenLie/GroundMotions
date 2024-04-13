@@ -1,4 +1,5 @@
 import os
+import shutil
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -506,6 +507,24 @@ class Selecting:
         output_dir = Path(output_dir)
         if not output_dir.exists():
             os.makedirs(output_dir)
+        else:
+            print('-------------- 警告 --------------')
+            print(f'"{output_dir.absolute()}"已存在，是否删除？')
+            res = input('[enter]-删除, ["q"]-退出, ["w"]-覆盖: ')
+            while True:
+                if res == '':
+                    print('已删除')
+                    shutil.rmtree(output_dir)
+                    os.makedirs(output_dir)
+                    break
+                elif res == 'q':
+                    print('退出选波')
+                    return
+                elif res == 'w':
+                    print('将覆盖数据')
+                    break
+                else:
+                    print(f'未知输入：{res}')
         plt.savefig(output_dir/'反应谱-规范谱对比.jpg', dpi=600)
         print('选波完成，请查看反应谱曲线')
         plt.show()
@@ -695,12 +714,6 @@ class Selecting:
     def _RMSE(y1, y2):
         """计算均方根值"""
         result = np.sqrt(sum((y1 - y2) ** 2) / len(y1))
-        # if sum(y2 - y1) > 0:
-        #     sgn = 1
-        # elif sum(y2 - y1) < 0:
-        #     sgn = -1
-        # else:
-        #     sgn = 1
         return result
 
     @staticmethod
@@ -728,7 +741,7 @@ if __name__ == "__main__":
     selector = Selecting()
     selector.import_files(file_acc, file_vel, file_disp, file_spec, file_info)
     selector.target_spectra('DBE谱J.txt')
-    selector.scaling_approach('c', para=(0.1, 2))
+    selector.scaling_approach('a', para=1)
     selector.matching_rules(rules=['c'], para=[(0.1, 2)], weight=[1])
     selector.constrain_range(N_events=5, scale_factor=(0.2, 10), component=['H1'])
     selected_records, records_info = selector.run(35)
