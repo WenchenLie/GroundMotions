@@ -17,16 +17,11 @@ from typing import Dict, Tuple
 更新：2024.03.13 增加输出缩放后反应谱
 更新：2024.03.31 增加输出反应谱对比图、各个匹配规则的误差值、选波参数的记录文档
 更新：2024.04.11 优化了梯度下降法的初值计算方法
+更新：2024.05.07 更新Info.hdh5文件格式（2.0）
 """
 
 class Selecting:
-    hdf5_md5 = {
-        'accec': 'a9f72231462d749a4eef78f777535b37',
-        'vel': '31da4a7b40348022cff829174973c56f',
-        'disp': 'af677c41597f69e3a524a13ab053246b',
-        'spec': '1ac24ba93a82a98ded9631d15c24e8ad',
-        'info': '7b94c44c7c82073ba720cd9971ec82dc'
-    }
+    version = '2.0'
     RSN_expected = set([i for i in range(1, 21541)])  # 官网宣称有的RSN（但实际不全）
 
     def __init__(self):
@@ -61,20 +56,7 @@ class Selecting:
         """导入hdf5文件"""
         for file in files:
             print(f'正在校验文件 - {file}')
-            md5 = self._check_file(file)
-            if md5 in self.hdf5_md5.values():
-                if md5 == self.hdf5_md5['accec']:
-                    self.file_accec = file
-                elif md5 == self.hdf5_md5['vel']:
-                    self.file_vel = file
-                elif md5 == self.hdf5_md5['disp']:
-                    self.file_disp = file
-                elif md5 == self.hdf5_md5['spec']:
-                    self.file_spec = file
-                elif md5 == self.hdf5_md5['info']:
-                    self.file_info = file
-            else:
-                raise ValueError(f'【Error】文件无效 - {file}')
+            self._check_file(file)
 
     def check_database(self):
         """进行数据库统计"""
@@ -269,7 +251,7 @@ class Selecting:
             ds = f_info[item]
             H1_file = ds.attrs['H1_file']
             H2_file = ds.attrs['H2_file']
-            V_file = ds.attrs['Vertical_file']
+            V_file = ds.attrs['V_file']
             RSN = int(ds.attrs['RSN'])
             Rjb = float(ds.attrs['Rjb'])
             Rrup = float(ds.attrs['Rrup'])
@@ -602,7 +584,7 @@ class Selecting:
                 component = 'H1'
             elif ds_info.attrs['H2_file'] == file_stem:
                 component = 'H2'
-            elif ds_info.attrs['Vertical_file'] == file_stem:
+            elif ds_info.attrs['V_file'] == file_stem:
                 component = 'V'
             else:
                 raise ValueError('【Error】1')
@@ -648,8 +630,8 @@ class Selecting:
             RSN_files.append(f_info[ds_name].attrs['H1_file'])
         elif f_info[ds_name].attrs['H2_file'] != '-':
             RSN_files.append(f_info[ds_name].attrs['H2_file'])
-        elif f_info[ds_name].attrs['Vertical_file'] != '-':
-            RSN_files.append(f_info[ds_name].attrs['Vertical_file'])
+        elif f_info[ds_name].attrs['V_file'] != '-':
+            RSN_files.append(f_info[ds_name].attrs['V_file'])
         return RSN_files
 
 
@@ -658,20 +640,21 @@ class Selecting:
         self.selecting_text += text + end
 
 
-    @staticmethod
-    def _check_file(file_path: str | Path):
-        """计算哈希值"""
-        with open(file_path, 'rb') as f:
-            f.seek(0, 2)
-            file_bytes = f.tell() 
-            check_bytes = file_bytes // 10
-            enc_obj = hashlib.md5()
-            for i in range(10):
-                f.seek(check_bytes * i, 0)
-                enc_obj.update(f.read(100))
-            f.seek(0)
-        return enc_obj.hexdigest()  
-    
+    @classmethod
+    def _check_file(cls, file_path: str | Path):
+        """检查文件是否存在且为最新版本"""
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileExistsError(f'无法找到文件：{file_path}')
+        with h5py.File(file_path, 'r') as f:
+            if 'VERSION' not in f:
+                version = '1.0'
+            else:
+                version = f['VERSION'][()].decode('utf-8')
+        if not version == cls.version:
+            raise FileExistsError(f'数据库文件版本过旧（{version} < {cls.version}），请使用update.py进行升级')
+
+
     @staticmethod
     def _get_y(x: np.ndarray, y: np.ndarray, x0: float | int):
         """求曲线在某点处的值"""
