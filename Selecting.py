@@ -52,8 +52,20 @@ class Selecting:
         self.norm_weight = None
         self.selecting_text = ''
 
-    def import_files(self, *files: Path | str):
+    def import_files(self,
+            file_acc: str | Path,
+            file_vel: str | Path,
+            file_disp: str | Path,
+            file_spec: str | Path,
+            file_info: str | Path,
+        ):
         """导入hdf5文件"""
+        files = [file_acc, file_vel, file_disp, file_spec, file_info]
+        self.file_accec = file_acc
+        self.file_vel = file_vel
+        self.file_disp = file_disp
+        self.file_spec = file_spec
+        self.file_info = file_info
         for file in files:
             print(f'正在校验文件 - {file}')
             self._check_file(file)
@@ -247,6 +259,8 @@ class Selecting:
             # if i == 1000:
             #     print(f' --------------- 调试模式，只考虑数据库中前{i}条地震波 --------------- ')
             #     break  # TODO for test
+            if item == 'VERSION':
+                continue
             print(f'  {int(i/len(f_info)*100)}%   \r', end='')
             ds = f_info[item]
             H1_file = ds.attrs['H1_file']
