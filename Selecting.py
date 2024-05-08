@@ -98,15 +98,17 @@ class Selecting:
         print('缺失地震动RSN：')
         print(RSN_missing)
 
-    def target_spectra(self, file: str | Path, plot_spectrum=False):
+    def target_spectra(self, file: str | Path, plot_spectrum: bool=False, scale: float=1):
         """定义目标谱（两列数据，周期(s)-谱值(g)）
 
         Args:
             file (str | Path): 文件路径
+            plot_spectrum (bool, optional): 是否绘制规范谱，默认False
+            scale (float, optional): 将目标谱进行缩放，缩放系数默认为1
         """
         data = np.loadtxt(file)
         self.T_targ0 = data[:, 0]  # 目标谱周期
-        self.Sa_targ0 = data[:, 1]  # 目标谱加速度
+        self.Sa_targ0 = data[:, 1] * scale  # 目标谱加速度
         if max(self.T_targ0) > 10:
             raise ValueError('【Error】目标谱周期范围不应超过10s')
         self.T_targ = np.arange(self.T_targ0[0], self.T_targ0[-1], 0.01)
@@ -452,6 +454,7 @@ class Selecting:
         if len(file_SF) < number:
             self._write(f'【Warning】符合条件的地震动数量({len(file_SF)})小于期望值({number})')
             number = len(file_SF)
+        print(f'符合条件的地震动数量：{len(file_SF)}')
         files_selection = sorted(file_error, key=lambda k: file_error[k][0])[:number]  # 选波结果（带排列）
         # 绘制反应谱
         f_accec = h5py.File(self.file_accec, 'r')
