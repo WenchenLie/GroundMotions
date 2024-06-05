@@ -199,8 +199,8 @@ class Selecting:
 
 
     def constrain_range(self, scale_factor: tuple=None, PGA: tuple=None, magnitude: tuple=None, Rjb: tuple=None, Rrup: tuple=None,
-                        vs30: tuple=None, D5_95: tuple=None, strike_slip: str='all', pulse: str | bool='all', N_events: int=None,
-                        RSN: tuple=None, component: list=['H1', 'H2', 'V']):
+                        vs30: tuple=None, D5_95: tuple=None, duration: tuple=None, strike_slip: str='all', pulse: str | bool='all',
+                        N_events: int=None, RSN: tuple=None, component: list=['H1', 'H2', 'V']):
         """定义约束范围
 
         Args:
@@ -211,6 +211,7 @@ class Selecting:
             Rrup (tuple, optional): 默认None
             vs30 (tuple, optional): 剪切波速，默认None
             D5_95 (tuple, optional): 有效持时，默认None
+            duration (tuple, optional): 持时，默认None
             strike_slip (str, optional): 振源机制，默认'all'
             * [all] all types
             * [a] strike slip
@@ -222,7 +223,7 @@ class Selecting:
             pulse (str | bool, optional): 脉冲型地震，默认'all'
             * [all] 不限定范围
             * [True] 仅脉冲型
-            * [False] 仅非脉冲型
+            * [False] 仅非脉冲型\n
             N_events (int, optional): 相同地震事件所允许的最大出现次数，默认None   
             RSN (tuple, optional): RSN，默认None
             component (list, optional): 地震动分量，默认['H1', 'H2', 'V']，可根据需要删减列表元素
@@ -235,6 +236,7 @@ class Selecting:
         self.range_Rrup = Rrup
         self.range_vs30 = vs30
         self.range_D5_95 = D5_95
+        self.duration = duration
         self.range_strike_slip = strike_slip
         self.range_pulse = pulse
         self.range_N_events = N_events
@@ -279,6 +281,7 @@ class Selecting:
             duration_5_75 = float(duration_5_75) if type(duration_5_75)!=str else ''
             duration_5_95 = ds.attrs['duration_5_95']
             duration_5_95 = float(duration_5_95) if type(duration_5_95)!=str else ''
+            duration = float(ds.attrs['duration'])
             earthquake_name = ds.attrs['earthquake_name']
             magnitude = float(ds.attrs['magnitude'])
             mechanism = ds.attrs['mechanism']
@@ -297,6 +300,9 @@ class Selecting:
                 if type(duration_5_95) is not float:
                     continue
                 if not self.range_D5_95[0] <= duration_5_95 <= self.range_D5_95[1]:
+                    continue
+            if self.duration:
+                if not self.duration[0] <= duration <= self.duration[1]:
                     continue
             if self.range_strike_slip != 'all':
                 if self.range_strike_slip == 'a' and mechanism != 'strike slip':
@@ -559,9 +565,9 @@ class Selecting:
             for RSN__ in RSN_list_:
                 files.extend(self._extract_one_RSN(RSN__, f_info))
         # 读取数据
-        df_info_columns = ['No.', 'RSN', 'component', 'Rjb (km)', 'R_rup (km)','Tp-pluse (s)',
-                           'arias Intensity (m/s)','5-75% Duration (s)', '5-95% Duration (s)',
-                           'earthquake_name', 'magnitude', 'mechanism', 'station','Vs30 (m/s)',
+        df_info_columns = ['No.', 'RSN', 'earthquake_name', 'component', 'Rjb (km)', 'R_rup (km)',
+                           'Tp-pluse (s)', 'arias Intensity (m/s)','5-75% Duration (s)',
+                           '5-95% Duration (s)', 'duration (s)', 'magnitude', 'mechanism', 'station','Vs30 (m/s)',
                            'year', PG_AVD, 'dt', 'NPTS', 'scale factor', 'Norm. error']
         df_info_columns += [f'error_{i}' for i in self.rules]
         df_info = pd.DataFrame(data=None, columns=df_info_columns)
@@ -585,6 +591,7 @@ class Selecting:
             arias = ds_info.attrs['arias']
             D_5_75 = ds_info.attrs['duration_5_75']
             D_5_95 = ds_info.attrs['duration_5_95']
+            duration = ds_info.attrs['duration']
             earthquake_name = ds_info.attrs['earthquake_name']
             magnitude = ds_info.attrs['magnitude']
             mechanism = ds_info.attrs['mechanism']
@@ -605,8 +612,8 @@ class Selecting:
                 component = 'V'
             else:
                 raise ValueError('【Error】1')
-            line = [i+1, RSN, component, Rjb, Rrup, Tp, arias, D_5_75, D_5_95,
-                    earthquake_name, magnitude, mechanism, station, vs30,
+            line = [i+1, RSN, earthquake_name, component, Rjb, Rrup, Tp, arias,
+                    D_5_75, D_5_95, duration, magnitude, mechanism, station, vs30,
                     year, peak, dt, NPTS, SF, error, *error_ls]
             df_info.loc[len(df_info.index)] = line
             data_spec = f_spec[file_stem][:]
