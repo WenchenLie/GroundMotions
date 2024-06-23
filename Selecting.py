@@ -1,15 +1,3 @@
-import os
-import shutil
-import numpy as np
-import matplotlib.pyplot as plt
-from pathlib import Path
-import hashlib
-import h5py
-from scipy.interpolate import interp1d
-import pandas as pd
-from typing import Dict, Tuple
-
-
 """
 基于NGAWest2地震动数据库的选波程序  
 开发者：Vincent  
@@ -18,13 +6,36 @@ from typing import Dict, Tuple
 更新：2024.03.31 增加输出反应谱对比图、各个匹配规则的误差值、选波参数的记录文档
 更新：2024.04.11 优化了梯度下降法的初值计算方法
 更新：2024.05.07 更新Info.hdh5文件格式（2.0）
+更新: 2024.06.23 选波结果写入pickle与origin
 """
+import os
+import sys
+import shutil
+import pickle
+from pathlib import Path
+from PIL import Image
+from typing import Literal, Dict, Tuple
+
+import h5py
+import originpro
+import originpro as op
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+from tkinter import messagebox
+
 
 class Selecting:
     version = '2.0'
     RSN_expected = set([i for i in range(1, 21541)])  # 官网宣称有的RSN（但实际不全）
 
-    def __init__(self):
+    def __init__(self, output_dir: Path | str):
+        """基于NGA West2地震动数据库的选波程序
+
+        Args:
+            output_dir (str | Path): 输出文件夹路径
+        """
         self.T_spec = np.arange(0, 10.01, 0.01)
         self.file_accec = None
         self.file_vel = None
@@ -51,6 +62,26 @@ class Selecting:
         self.range_component = ['H1', 'H2', 'V']
         self.norm_weight = None
         self.selecting_text = ''
+        self.records = Records()  # 导出的波库
+        # 打开文件
+        output_dir = Path(output_dir)
+        if not output_dir.exists():
+            os.makedirs(output_dir)
+        else:
+            res = messagebox.askokcancel('警告', f'"{output_dir.absolute()}"已存在，是否删除？', icon='warning')
+            if res:
+                shutil.rmtree(output_dir)
+                os.makedirs(output_dir)
+                print('已删除')
+            else:
+                res1 = messagebox.askokcancel('警告', '是否覆盖？', icon='warning')
+                if res1:
+                    print('将覆盖数据')
+                else:
+                    print('退出选波')
+                    return
+        self.output_dir = output_dir
+
 
     def import_files(self,
             file_acc: str | Path,
@@ -137,17 +168,17 @@ class Selecting:
             case 'a':
                 self._write('按PGA缩放')
                 if para:
-                    self._write(f'(已指定PGA={para}g)')
+                    self._write(f'(已指定PGA={para:.4f}g)')
             case 'b':
                 if type(para) is not tuple:
-                    self._write(f'按Sa({para})缩放')
+                    self._write(f'按Sa({round(para, 6)})缩放')
                 else:
-                    self._write(f'按Sa({para[0]})缩放')
-                    self._write(f'(已指定a({para[0]})={para[1]}g)')
+                    self._write(f'按Sa({round(para[0], 6)})缩放')
+                    self._write(f'(已指定a({round(para[0], 6)})={round(para[1], 6)}g)')
             case 'c':
-                self._write(f'按{para[0]}~{para[1]}周期范围进行缩放(令RSME最小)')
+                self._write(f'按{round(para[0], 6)}~{round(para[1], 6)}周期范围进行缩放(令RSME最小)')
             case 'd':
-                self._write(f'按{para[0]}~{para[1]}周期范围内的Sa_avg进行缩放(几何平均数)')
+                self._write(f'按{round(para[0], 6)}~{round(para[1], 6)}周期范围内的Sa_avg进行缩放(几何平均数)')
             case 'e':
                 self._write(f'指定缩放系数({para})')
 
@@ -191,11 +222,11 @@ class Selecting:
                 case 'a':
                     self._write(f'({i+1}) 按PGA匹配，权重={weight[i]}')
                 case 'b':
-                    self._write(f'({i+1}) 按Sa({para[i]})匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按Sa({round(para[i], 6)})匹配，权重={weight[i]}')
                 case 'c':
-                    self._write(f'({i+1}) 按{para[i][0]}~{para[i][1]}周期范围的RSME值进行匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按{round(para[i][0], 6)}~{round(para[i][1], 6)}周期范围的RSME值进行匹配，权重={weight[i]}')
                 case 'd':
-                    self._write(f'({i+1}) 按{para[i][0]}~{para[i][1]}周期范围的Sa_avg值(几何平均数)进行匹配，权重={weight[i]}')
+                    self._write(f'({i+1}) 按{round(para[i][0], 6)}~{round(para[i][1], 6)}周期范围的Sa_avg值(几何平均数)进行匹配，权重={weight[i]}')
 
 
     def constrain_range(self, scale_factor: tuple=None, PGA: tuple=None, magnitude: tuple=None, Rjb: tuple=None, Rrup: tuple=None,
@@ -254,6 +285,7 @@ class Selecting:
             list[str]: 包括所有选波结果地震动名（无后缀）的列表
             dict: {地震动名: (缩放系数, 匹配误差)}
         """
+        records = self.records
         print('正在进行初步筛选...')
         files_within_range = []  # 约束范围内（除了PGA,scale_factor,N_events）的备选波
         f_spec = h5py.File(self.file_spec, 'r')
@@ -466,10 +498,12 @@ class Selecting:
         f_accec = h5py.File(self.file_accec, 'r')
         Sa_sum = np.zeros(len(T))
         label = 'Individual'
+        individual_spec = T
         for file in files_selection:
             Sa = f_spec[file][:] * file_SF[file]
             Sa_sum += Sa
             plt.plot(T, Sa, color='#A6A6A6', label=label)
+            individual_spec = np.column_stack((individual_spec, Sa))
             if label:
                 label = None
         plt.plot(self.T_targ0, self.Sa_targ0, label='Target', color='black', lw=3)
@@ -482,6 +516,9 @@ class Selecting:
         f_info.close()
         f_spec.close()
         f_accec.close()
+        records.target_spec = np.column_stack((self.T_targ0, self.Sa_targ0))
+        records.individual_spec = individual_spec
+        records.mean_spec = np.column_stack((T, Sa_sum / len(files_selection)))
         file_SF_error = {}  # {地震名: (缩放系数, 匹配误差)}
         for file in files_selection:
             SF = file_SF[file]
@@ -490,13 +527,12 @@ class Selecting:
         return files_selection, file_SF_error
 
 
-    def extract_records(self, output_dir: str | Path, type_: str='A', RSN: int=None, RSN_list: list[int]=None,
+    def extract_records(self, type_: str='A', RSN: int=None, RSN_list: list[int]=None,
                         RSN_range: list[int, int]=None, files: list=[], file_SF_error: Dict[str, Tuple[float, float, list]]={},
                         write_unscaled_record: bool=True, write_norm_record: bool=True, write_scaled_records: bool=True):
         """提取地震动数据
 
         Args:
-            output_dir (str | Path): 输出文件夹路径
             type_ (str): 'A'、'V'或'D'，代表加速度、速度和位移
             RSN (int, optional): 按给定的单个RSN序号提取，默认None
             RSN_list (list, optional): 按RSN列表提取，默认None
@@ -508,29 +544,11 @@ class Selecting:
             write_scaled_records (bool, optional): 是否写入缩放后地震动，默认True
         """
         print('正在提取地震动...')
-        # 打开文件
-        output_dir = Path(output_dir)
-        if not output_dir.exists():
-            os.makedirs(output_dir)
-        else:
-            print('-------------- 警告 --------------')
-            print(f'"{output_dir.absolute()}"已存在，是否删除？')
-            res = input('[enter]-删除, ["q"]-退出, ["w"]-覆盖: ')
-            while True:
-                if res == '':
-                    print('已删除')
-                    shutil.rmtree(output_dir)
-                    os.makedirs(output_dir)
-                    break
-                elif res == 'q':
-                    print('退出选波')
-                    return
-                elif res == 'w':
-                    print('将覆盖数据')
-                    break
-                else:
-                    print(f'未知输入：{res}')
+        records = self.records
+        output_dir = self.output_dir
         plt.savefig(output_dir/'反应谱-规范谱对比.jpg', dpi=600)
+        img = Image.open(output_dir/'反应谱-规范谱对比.jpg')
+        records.img = img
         print('选波完成，请查看反应谱曲线')
         plt.show()
         if write_unscaled_record:
@@ -630,6 +648,8 @@ class Selecting:
                 np.savetxt(output_dir/'归一化地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', self._normalize(data))
             if write_scaled_records:
                 np.savetxt(output_dir/'缩放后地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data_scaled)
+            records._add_record(data, data_spec, SF, type_)
+        records.info = df_info
         data_spec_mean = data_spec_sum / len(files)
         data_scaled_spec_mean = data_scaled_spec_sum / len(files)
         df_spec['Mean'] = data_spec_mean
@@ -637,11 +657,32 @@ class Selecting:
         df_info.to_csv(output_dir/'地震动信息.csv', index=None)
         df_spec.to_csv(output_dir/'未缩放反应谱.csv', index=False)
         df_scaled_spec.to_csv(output_dir/'缩放后反应谱.csv', index=False)
+        file_path = output_dir / f'records.opju'
+        with WriteOrigin(op, file_path, 'results') as f_op:
+            print('正在写入origin文件...\r', end='')
+            f_op.delete_obj('Book1')
+            wb1 = op.new_book('w')
+            wb1.lname = '选波信息'
+            ws: originpro.WSheet = wb1[0]
+            ws.from_df(df_info)  # 写入选波信息
+            wb2 = op.new_book('w')
+            wb2.lname = '反应谱'
+            ws: originpro.WSheet = wb2[0]
+            ws.from_list(0, records.individual_spec[:, 0], 'T', 's', axis='X')
+            for col in range(1, records.individual_spec.shape[1]):
+                ws.from_list(col, records.individual_spec[:, col], 'Sa', 'g', axis='Y')
+            ws.from_list(col + 1, records.target_spec[:, 0], 'T', 's', axis='X')
+            ws.from_list(col + 2, records.target_spec[:, 1], 'Sa', 'g', 'Target', axis='Y')  # 写入目标谱
+            ws.from_list(col + 3, records.mean_spec[:, 0], 'T', 's', axis='X')
+            ws.from_list(col + 4, records.mean_spec[:, 1], 'Sa', 'g', 'Mean', axis='Y')  # 写入平均谱
+        print('已导出origin文件          ')
         with open(output_dir/'选波参数设置.txt', 'w') as f:
             f.write(self.selecting_text)
+        records.selecting_text = self.selecting_text  # 记录选波设置文本
         f_info.close()
         f_spec.close()
         f_data.close()
+        records._to_pkl('records', output_dir)
         print('完成！')
 
     def _extract_one_RSN(self, RSN: int, f_info: h5py.File):
@@ -657,7 +698,6 @@ class Selecting:
         elif f_info[ds_name].attrs['V_file'] != '-':
             RSN_files.append(f_info[ds_name].attrs['V_file'])
         return RSN_files
-
 
     def _write(self, text: str, end='\n'):
         print(text)
@@ -738,6 +778,132 @@ class Selecting:
         return data_norm
     
 
+class Records:
+    def __init__(self, name: str=None):
+        self.name = name  # 小波库名
+        self.N_gm = 0  # 地震动数量
+        self.info: pd.DataFrame = None  # 地震动信息
+        self.unscaled_data: list[np.ndarray] = []  # 未缩放时程序列
+        self.unscaled_spec: list[np.ndarray] = []  # 未缩放反应谱数据
+        self.SF: list[float] = []  # 缩放系数
+        self.type_: list[Literal['A', 'V', 'D']] = []  # 数据类型(加速度, 速度, 位移)
+        self.selecting_text: str = None
+        self.target_spec: np.ndarray = None  # 目标谱(2列, 周期&加速度谱值)
+        self.individual_spec: np.ndarray = None  # 各条波反应谱(1+N列, 周期&多列加速度谱值)
+        self.mean_spec: np.ndarray = None  # 平均谱(2列, 周期&平均加速度谱值)
+        self.img: Image = None  # 反应谱对比图
+
+    def _add_record(self,
+            unscaled_data: np.ndarray,
+            unscaled_spec: np.ndarray,
+            SF: float,
+            type_: Literal['A', 'V', 'D']):
+        """记录一条地震动
+
+        Args:
+            unscaled_data (np.ndarray): 无缩放的时程序列
+            unscaled_spec (np.ndarray): 无缩放的反应谱
+            SF (float): 缩放系数
+            type_ (Literal['A', 'V', 'D']): 数据类型(加速度, 速度, 位移)
+        """
+        self.N_gm += 1
+        self.unscaled_data.append(unscaled_data)
+        self.unscaled_spec.append(unscaled_spec)
+        self.SF.append(SF)
+        self.type_.append(type_)
+
+    def _to_pkl(self, file_name: str, folder: Path | str):
+        """导出实例到pkl文件
+
+        Args:
+            file_name (str): 文件名(不带后缀)
+            folder (Path | str): 文件夹路径
+        """
+        print(f'正在写入pickle文件...\r', end='')
+        folder = Path(folder)
+        if not folder.exists():
+            raise FileExistsError(f'{str(folder.absolute())}不存在！')
+        with open(folder / f'{file_name}.pkl', 'wb') as f:
+            pickle.dump(self, f)
+        print(f'已导出pickle文件            ')
+
+    def plot_spectra(self):
+        T = self.individual_spec[:, 0]
+        label = 'Individual'
+        for col in range(1, self.individual_spec.shape[1]):
+            Sa = self.individual_spec[:, col]
+            plt.plot(T, Sa, color='#A6A6A6', label=label)
+            if label:
+                label = None
+        plt.plot(self.target_spec[:, 0], self.target_spec[:, 1], label='Target', color='black', lw=3)
+        plt.plot(self.mean_spec[:, 0], self.mean_spec[:, 1], color='red', label='Mean', lw=3)
+        plt.xlim(min(self.target_spec[:, 0]), max(self.target_spec[:, 0]))
+        plt.title('Selected records')
+        plt.xlabel('T [s]')
+        plt.ylabel('Sa [g]')
+        plt.legend()
+        plt.show()
+
+    
+
+
+class WriteOrigin():
+    def __init__(self, op: originpro, opju_file: Path, folder_name:str, set_show: bool=False) -> None:
+        """写入origin文件
+
+        Args:
+            op (originpro): originpro对象
+            opju_file (Path): opju的路径，数据将保存到这个文件，若该opju文件不存在则将创建，若存在则将打开并写入数据
+            set_show (bool, optional): 是否显示origin窗口, 默认False
+        """
+        self.op = op
+        self.opju_file = opju_file
+        self.folder_name = folder_name
+        self.set_show = set_show
+
+    def __enter__(self):
+        if self.op and self.op.oext:
+            sys.excepthook = self.origin_shutdown_exception_hook
+        if self.op.oext:
+            self.op.set_show(self.set_show)
+        if not self.opju_file.exists():
+            # 如果opju文件不存在则创建
+            self.op.new(self.opju_file.absolute().as_posix())
+            fd = self.op.pe.active_folder()
+            fd.name = self.folder_name
+        else:
+            # 如果存在则打开
+            self.op.open(self.opju_file.absolute().as_posix())
+            res0 = None
+            while True:
+                res1 = self.op.pe.cd('..')
+                if res0 == res1:
+                    break  # 返回上级origin文件夹，直至最顶层
+                res0 = res1
+            self.op.pe.mkdir(self.folder_name, True)  # 创建origin文件夹，如果已经存在则不会创建
+            self.op.pe.cd(self.folder_name)  # 进入origin文件夹
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.op.save(str(self.opju_file.absolute()))
+        if self.op.oext:
+            self.op.exit()
+        return False
+    
+    def origin_shutdown_exception_hook(self, exctype, value, traceback):
+        '''Ensures Origin gets shut down if an uncaught exception'''
+        self.op.exit()
+        sys.__excepthook__(exctype, value, traceback)
+
+    def delete_obj(self, obj_name: str):
+        """删除表格
+
+        Args:
+            obj_name (str.WBook): 表格名
+        """
+        wb = self.op.find_book('w', obj_name)
+        if wb:
+            wb.destroy()
 
 if __name__ == "__main__":
     file_acc = r'G:\NGAWest2\Acceleration.hdf5'
