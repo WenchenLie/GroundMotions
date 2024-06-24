@@ -11,10 +11,9 @@
 import os
 import sys
 import shutil
-import pickle
 from pathlib import Path
 from PIL import Image
-from typing import Literal, Dict, Tuple
+from tkinter import messagebox
 
 import h5py
 import originpro
@@ -23,7 +22,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
-from tkinter import messagebox
+from SeismicUtils.Records import Records
 
 
 class Selecting:
@@ -294,7 +293,7 @@ class Selecting:
         for i, item in enumerate(f_info):
             # if i == 1000:
             #     print(f' --------------- 调试模式，只考虑数据库中前{i}条地震波 --------------- ')
-            #     break  # TODO for test
+            #     break  # NOTE: for test
             if item == 'VERSION':
                 continue
             print(f'  {int(i/len(f_info)*100)}%   \r', end='')
@@ -527,13 +526,12 @@ class Selecting:
         return files_selection, file_SF_error
 
 
-    def extract_records(self, type_: str='A', RSN: int=None, RSN_list: list[int]=None,
-                        RSN_range: list[int, int]=None, files: list=[], file_SF_error: Dict[str, Tuple[float, float, list]]={},
+    def extract_records(self, RSN: int=None, RSN_list: list[int]=None,
+                        RSN_range: list[int, int]=None, files: list=[], file_SF_error: dict[str, tuple[float, float, list]]={},
                         write_unscaled_record: bool=True, write_norm_record: bool=True, write_scaled_records: bool=True):
         """提取地震动数据
 
         Args:
-            type_ (str): 'A'、'V'或'D'，代表加速度、速度和位移
             RSN (int, optional): 按给定的单个RSN序号提取，默认None
             RSN_list (list, optional): 按RSN列表提取，默认None
             RSN_range (list, optional): 按RSN范围提取，默认None
@@ -559,18 +557,9 @@ class Selecting:
             self._new_folder(output_dir/'缩放后地震动')
         f_info = h5py.File(self.file_info, 'r')
         f_spec = h5py.File(self.file_spec, 'r')
-        if type_ == 'A':
-            f_data = h5py.File(self.file_accec, 'r')
-            suffix = '.AT2'
-            PG_AVD = 'PGA'
-        elif type_ == 'V':
-            f_data = h5py.File(self.file_vel, 'r')
-            suffix = '.VT2'
-            PG_AVD = 'PGV'
-        elif type_ == 'D':
-            f_data = h5py.File(self.file_disp, 'r')
-            suffix = '.DT2'
-            PG_AVD = 'PGD'
+        f_A = h5py.File(self.file_accec, 'r')
+        f_V = h5py.File(self.file_vel, 'r')
+        f_D = h5py.File(self.file_disp, 'r')
         # 找到地震动文件名
         if RSN:
             files.extend(self._extract_one_RSN(RSN, f_info))
@@ -586,7 +575,7 @@ class Selecting:
         df_info_columns = ['No.', 'RSN', 'earthquake_name', 'component', 'Rjb (km)', 'R_rup (km)',
                            'Tp-pluse (s)', 'arias Intensity (m/s)','5-75% Duration (s)',
                            '5-95% Duration (s)', 'duration (s)', 'magnitude', 'mechanism', 'station','Vs30 (m/s)',
-                           'year', PG_AVD, 'dt', 'NPTS', 'scale factor', 'Norm. error']
+                           'year', 'PGA (g)', 'PGV (mm/s)', 'PGD (mm)', 'dt', 'NPTS', 'scale factor', 'Norm. error']
         df_info_columns += [f'error_{i}' for i in self.rules]
         df_info = pd.DataFrame(data=None, columns=df_info_columns)
         # Ta, Tb = min(self.T_targ0), max(self.T_targ0)
@@ -595,13 +584,16 @@ class Selecting:
         data_spec_sum = np.zeros(len(self.T_spec))
         data_scaled_spec_sum = np.zeros(len(self.T_spec))
         for i, file_stem in enumerate(files):
-            file = file_stem + suffix
-            ds_data = f_data[file]
-            RSN = ds_data.attrs['RSN']
-            peak = ds_data.attrs[PG_AVD]
-            data = ds_data[:]
-            dt = ds_data.attrs['dt']
-            NPTS = ds_data.attrs['NPTS']
+            ds_A = f_A[file_stem + '.AT2']
+            ds_V = f_V[file_stem + '.VT2']
+            ds_D = f_D[file_stem + '.DT2']
+            RSN = ds_A.attrs['RSN']
+            PGA = ds_A.attrs['PGA']
+            PGV = ds_V.attrs['PGV']
+            PGD = ds_D.attrs['PGD']
+            data = ds_A[:]
+            dt = ds_A.attrs['dt']
+            NPTS = ds_A.attrs['NPTS']
             ds_info = f_info[f'RSN{RSN}']
             Rjb = ds_info.attrs['Rjb']
             Rrup = ds_info.attrs['Rrup']
@@ -632,7 +624,7 @@ class Selecting:
                 raise ValueError('【Error】1')
             line = [i+1, RSN, earthquake_name, component, Rjb, Rrup, Tp, arias,
                     D_5_75, D_5_95, duration, magnitude, mechanism, station, vs30,
-                    year, peak, dt, NPTS, SF, error, *error_ls]
+                    year, PGA, PGV, PGD, dt, NPTS, SF, error, *error_ls]
             df_info.loc[len(df_info.index)] = line
             data_spec = f_spec[file_stem][:]
             data_scaled_spec = f_spec[file_stem][:] * SF
@@ -648,7 +640,7 @@ class Selecting:
                 np.savetxt(output_dir/'归一化地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', self._normalize(data))
             if write_scaled_records:
                 np.savetxt(output_dir/'缩放后地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data_scaled)
-            records._add_record(data, data_spec, SF, type_)
+            records._add_record(data, data_spec, SF, dt, 'A')
         records.info = df_info
         data_spec_mean = data_spec_sum / len(files)
         data_scaled_spec_mean = data_scaled_spec_sum / len(files)
@@ -681,7 +673,9 @@ class Selecting:
         records.selecting_text = self.selecting_text  # 记录选波设置文本
         f_info.close()
         f_spec.close()
-        f_data.close()
+        f_A.close()
+        f_V.close()
+        f_D.close()
         records._to_pkl('records', output_dir)
         print('完成！')
 
@@ -777,75 +771,6 @@ class Selecting:
         data_norm = data / peak
         return data_norm
     
-
-class Records:
-    def __init__(self, name: str=None):
-        self.name = name  # 小波库名
-        self.N_gm = 0  # 地震动数量
-        self.info: pd.DataFrame = None  # 地震动信息
-        self.unscaled_data: list[np.ndarray] = []  # 未缩放时程序列
-        self.unscaled_spec: list[np.ndarray] = []  # 未缩放反应谱数据
-        self.SF: list[float] = []  # 缩放系数
-        self.type_: list[Literal['A', 'V', 'D']] = []  # 数据类型(加速度, 速度, 位移)
-        self.selecting_text: str = None
-        self.target_spec: np.ndarray = None  # 目标谱(2列, 周期&加速度谱值)
-        self.individual_spec: np.ndarray = None  # 各条波反应谱(1+N列, 周期&多列加速度谱值)
-        self.mean_spec: np.ndarray = None  # 平均谱(2列, 周期&平均加速度谱值)
-        self.img: Image = None  # 反应谱对比图
-
-    def _add_record(self,
-            unscaled_data: np.ndarray,
-            unscaled_spec: np.ndarray,
-            SF: float,
-            type_: Literal['A', 'V', 'D']):
-        """记录一条地震动
-
-        Args:
-            unscaled_data (np.ndarray): 无缩放的时程序列
-            unscaled_spec (np.ndarray): 无缩放的反应谱
-            SF (float): 缩放系数
-            type_ (Literal['A', 'V', 'D']): 数据类型(加速度, 速度, 位移)
-        """
-        self.N_gm += 1
-        self.unscaled_data.append(unscaled_data)
-        self.unscaled_spec.append(unscaled_spec)
-        self.SF.append(SF)
-        self.type_.append(type_)
-
-    def _to_pkl(self, file_name: str, folder: Path | str):
-        """导出实例到pkl文件
-
-        Args:
-            file_name (str): 文件名(不带后缀)
-            folder (Path | str): 文件夹路径
-        """
-        print(f'正在写入pickle文件...\r', end='')
-        folder = Path(folder)
-        if not folder.exists():
-            raise FileExistsError(f'{str(folder.absolute())}不存在！')
-        with open(folder / f'{file_name}.pkl', 'wb') as f:
-            pickle.dump(self, f)
-        print(f'已导出pickle文件            ')
-
-    def plot_spectra(self):
-        T = self.individual_spec[:, 0]
-        label = 'Individual'
-        for col in range(1, self.individual_spec.shape[1]):
-            Sa = self.individual_spec[:, col]
-            plt.plot(T, Sa, color='#A6A6A6', label=label)
-            if label:
-                label = None
-        plt.plot(self.target_spec[:, 0], self.target_spec[:, 1], label='Target', color='black', lw=3)
-        plt.plot(self.mean_spec[:, 0], self.mean_spec[:, 1], color='red', label='Mean', lw=3)
-        plt.xlim(min(self.target_spec[:, 0]), max(self.target_spec[:, 0]))
-        plt.title('Selected records')
-        plt.xlabel('T [s]')
-        plt.ylabel('Sa [g]')
-        plt.legend()
-        plt.show()
-
-    
-
 
 class WriteOrigin():
     def __init__(self, op: originpro, opju_file: Path, folder_name:str, set_show: bool=False) -> None:
