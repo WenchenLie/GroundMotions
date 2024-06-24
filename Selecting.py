@@ -541,7 +541,6 @@ class Selecting:
             write_norm_record (bool, optional): 是否写入归一化地震动，默认True
             write_scaled_records (bool, optional): 是否写入缩放后地震动，默认True
         """
-        print('正在提取地震动...')
         records = self.records
         output_dir = self.output_dir
         plt.savefig(output_dir/'反应谱-规范谱对比.jpg', dpi=600)
@@ -549,6 +548,7 @@ class Selecting:
         records.img = img
         print('选波完成，请查看反应谱曲线')
         plt.show()
+        print('正在提取地震动...')
         if write_unscaled_record:
             self._new_folder(output_dir/'未缩放地震动')
         if write_norm_record:
@@ -576,14 +576,18 @@ class Selecting:
                            'Tp-pluse (s)', 'arias Intensity (m/s)','5-75% Duration (s)',
                            '5-95% Duration (s)', 'duration (s)', 'magnitude', 'mechanism', 'station','Vs30 (m/s)',
                            'year', 'PGA (g)', 'PGV (mm/s)', 'PGD (mm)', 'dt', 'NPTS', 'scale factor', 'Norm. error']
+        N = len(files)  # 地震动数量
+        N_T = len(self.T_spec)  # 周期点数量
         df_info_columns += [f'error_{i}' for i in self.rules]
-        df_info = pd.DataFrame(data=None, columns=df_info_columns)
-        # Ta, Tb = min(self.T_targ0), max(self.T_targ0)
-        df_spec = pd.DataFrame(data=self.T_spec, columns=['T (s)'])  # 未缩放反应谱
-        df_scaled_spec = pd.DataFrame(data=self.T_spec, columns=['T (s)'])  # 缩放后反应谱
+        df_info = pd.DataFrame(pd.NA, columns=df_info_columns, index=range(N))
+        df_spec = pd.DataFrame(pd.NA, columns=['T (s)']+[f'No. {i}' for i in range(1, N + 1)]+['Mean'], index=range(N_T))  # 未缩放反应谱
+        df_spec['T (s)'] = self.T_spec
+        df_scaled_spec = pd.DataFrame(pd.NA, columns=['T (s)']+[f'No. {i}' for i in range(1, N + 1)]+['Mean'], index=range(N_T))  # 缩放后反应谱
+        df_scaled_spec['T (s)'] = self.T_spec
         data_spec_sum = np.zeros(len(self.T_spec))
         data_scaled_spec_sum = np.zeros(len(self.T_spec))
         for i, file_stem in enumerate(files):
+            print(f'正在写入txt... ({i+1}/{N})\r', end='')
             ds_A = f_A[file_stem + '.AT2']
             ds_V = f_V[file_stem + '.VT2']
             ds_D = f_D[file_stem + '.DT2']
@@ -641,6 +645,7 @@ class Selecting:
             if write_scaled_records:
                 np.savetxt(output_dir/'缩放后地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data_scaled)
             records._add_record(data, data_spec, SF, dt, 'A')
+        print()
         records.info = df_info
         data_spec_mean = data_spec_sum / len(files)
         data_scaled_spec_mean = data_scaled_spec_sum / len(files)
