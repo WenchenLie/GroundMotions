@@ -7,6 +7,7 @@
 更新：2024.04.11 优化了梯度下降法的初值计算方法
 更新：2024.05.07 更新Info.hdh5文件格式（2.0）
 更新: 2024.06.23 选波结果写入pickle与origin
+更新：2024.06.28 可调用类方法进行地震动直接提取
 """
 import os
 import sys
@@ -14,6 +15,7 @@ import shutil
 from pathlib import Path
 from PIL import Image
 from tkinter import messagebox
+from typing import Literal
 
 import h5py
 import originpro
@@ -28,6 +30,10 @@ from SeismicUtils.Records import Records
 class Selecting:
     version = '2.0'
     RSN_expected = set([i for i in range(1, 21541)])  # 官网宣称有的RSN（但实际不全）
+    df_info_columns = ['No.', 'RSN', 'earthquake_name', 'component', 'Rjb (km)', 'R_rup (km)',
+                        'Tp-pluse (s)', 'arias Intensity (m/s)','5-75% Duration (s)',
+                        '5-95% Duration (s)', 'duration (s)', 'magnitude', 'mechanism', 'station','Vs30 (m/s)',
+                        'year', 'PGA (g)', 'PGV (mm/s)', 'PGD (mm)', 'dt', 'NPTS', 'scale factor', 'Norm. error']
 
     def __init__(self, output_dir: Path | str):
         """基于NGA West2地震动数据库的选波程序
@@ -64,13 +70,18 @@ class Selecting:
         self.records = Records()  # 导出的波库
         # 打开文件
         output_dir = Path(output_dir)
-        if not output_dir.exists():
-            os.makedirs(output_dir)
+        self._create_folder(output_dir)
+        self.output_dir = output_dir
+
+    @staticmethod
+    def _create_folder(folder: Path):
+        if not folder.exists():
+            os.makedirs(folder)
         else:
-            res = messagebox.askokcancel('警告', f'"{output_dir.absolute()}"已存在，是否删除？', icon='warning')
+            res = messagebox.askokcancel('警告', f'"{folder.absolute()}"已存在，是否删除？', icon='warning')
             if res:
-                shutil.rmtree(output_dir)
-                os.makedirs(output_dir)
+                shutil.rmtree(folder)
+                os.makedirs(folder)
                 print('已删除')
             else:
                 res1 = messagebox.askokcancel('警告', '是否覆盖？', icon='warning')
@@ -79,8 +90,6 @@ class Selecting:
                 else:
                     print('退出选波')
                     return
-        self.output_dir = output_dir
-
 
     def import_files(self,
             file_acc: str | Path,
@@ -99,6 +108,25 @@ class Selecting:
         for file in files:
             print(f'正在校验文件 - {file}')
             self._check_file(file)
+
+    @classmethod
+    def import_files(cls,
+            file_acc: str | Path,
+            file_vel: str | Path,
+            file_disp: str | Path,
+            file_spec: str | Path,
+            file_info: str | Path,
+        ):
+        """类方法，无需实例化对象来导入波库"""
+        files = [file_acc, file_vel, file_disp, file_spec, file_info]
+        cls.file_accec = file_acc
+        cls.file_vel = file_vel
+        cls.file_disp = file_disp
+        cls.file_spec = file_spec
+        cls.file_info = file_info
+        for file in files:
+            print(f'正在校验文件 - {file}')
+            cls._check_file(file)
 
     def check_database(self):
         """进行数据库统计"""
@@ -526,8 +554,7 @@ class Selecting:
         return files_selection, file_SF_error
 
 
-    def extract_records(self, RSN: int=None, RSN_list: list[int]=None,
-                        RSN_range: list[int, int]=None, files: list=[], file_SF_error: dict[str, tuple[float, float, list]]={},
+    def extract_records(self, files: list=[], file_SF_error: dict[str, tuple[float, float, list]]={},
                         write_unscaled_record: bool=True, write_norm_record: bool=True, write_scaled_records: bool=True):
         """提取地震动数据
 
@@ -560,22 +587,8 @@ class Selecting:
         f_A = h5py.File(self.file_accec, 'r')
         f_V = h5py.File(self.file_vel, 'r')
         f_D = h5py.File(self.file_disp, 'r')
-        # 找到地震动文件名
-        if RSN:
-            files.extend(self._extract_one_RSN(RSN, f_info))
-        if RSN_list:
-            for RSN_ in RSN_list:
-                files.extend(self._extract_one_RSN(RSN_, f_info))
-        if RSN_range:
-            RSN_list_ = list(range(RSN_range))
-            RSN_list_.append(RSN_range[-1])
-            for RSN__ in RSN_list_:
-                files.extend(self._extract_one_RSN(RSN__, f_info))
         # 读取数据
-        df_info_columns = ['No.', 'RSN', 'earthquake_name', 'component', 'Rjb (km)', 'R_rup (km)',
-                           'Tp-pluse (s)', 'arias Intensity (m/s)','5-75% Duration (s)',
-                           '5-95% Duration (s)', 'duration (s)', 'magnitude', 'mechanism', 'station','Vs30 (m/s)',
-                           'year', 'PGA (g)', 'PGV (mm/s)', 'PGD (mm)', 'dt', 'NPTS', 'scale factor', 'Norm. error']
+        df_info_columns = self.df_info_columns
         N = len(files)  # 地震动数量
         N_T = len(self.T_spec)  # 周期点数量
         df_info_columns += [f'error_{i}' for i in self.rules]
@@ -684,24 +697,214 @@ class Selecting:
         records._to_pkl('records', output_dir)
         print('完成！')
 
-    def _extract_one_RSN(self, RSN: int, f_info: h5py.File):
+    @classmethod
+    def extract_records(cls,
+            output_dir: str | Path,
+            RSN: int=None,
+            RSN_list: list[int]=[],
+            RSN_range: list[int, int]=[],
+            components: list[str]=['H1', 'H2', 'V'],
+            type_: Literal['A', 'V', 'D']='A'
+        ) -> Records:
+        """提取地震动数据的类方法
+
+        Args:
+            output_dir (str | Path): 输出文件夹路径
+            RSN (int, optional): 按给定的单个RSN序号提取，默认None
+            RSN_list (list, optional): 按RSN列表提取，默认None
+            RSN_range (list, optional): 按RSN范围提取，默认None
+            component (list[str], optional): 地震动分量，默认包含三个分量
+            type_ (str, optional): 数据类型(加速度、速度或位移)，默认加速度
+
+        Returns (Records): Records对象
+        """
+        output_dir = Path(output_dir)
+        cls._create_folder(output_dir)
+        RSNs = []
+        records = Records()
+        if RSN:
+            RSNs.append(RSN)
+        if RSN_list:
+            RSNs += RSN_list
+        if RSN_range:
+            RSNs += list(range(RSN_range[0], RSN_range[1]))
+        [cls.check_RSN_exists(RSN_) for RSN_ in RSNs]
+        f_info = h5py.File(cls.file_info, 'r')
+        f_spec = h5py.File(cls.file_spec, 'r')
+        f_A = h5py.File(cls.file_accec, 'r')
+        f_V = h5py.File(cls.file_vel, 'r')
+        f_D = h5py.File(cls.file_disp, 'r')
+        file_name: list[str] = []
+        for _, RSN_ in enumerate(RSNs):
+            file_name += cls._extract_one_RSN(None, RSN_, f_info, components)
+        T_spec = np.arange(0, 10.01, 0.01)
+        N = len(file_name)
+        N_T = len(T_spec)
+        df_info = pd.DataFrame(pd.NA, columns=cls.df_info_columns, index=range(N))
+        df_spec = pd.DataFrame(pd.NA, columns=['T (s)']+[f'No. {i}' for i in range(1, N + 1)]+['Mean'], index=range(N_T))  # 未缩放反应谱
+        df_spec['T (s)'] = T_spec
+        data_spec_sum = np.zeros((N_T))
+        data_scaled_spec_sum = np.zeros((N_T))
+        records.target_spec = np.column_stack((T_spec, np.zeros(N_T)))
+        individual_spec = T_spec
+        cls._new_folder(output_dir/'未缩放地震动')
+        cls._new_folder(output_dir/'归一化地震动')
+        cls._new_folder(output_dir/'缩放后地震动')
+        for i, file_stem in enumerate(file_name):
+            print(f'正在写入txt... ({i+1}/{N})\r', end='')
+            ds_A = f_A[file_stem + '.AT2']
+            ds_V = f_V[file_stem + '.VT2']
+            ds_D = f_D[file_stem + '.DT2']
+            RSN = ds_A.attrs['RSN']
+            PGA = ds_A.attrs['PGA']
+            PGV = ds_V.attrs['PGV']
+            PGD = ds_D.attrs['PGD']
+            if type_ == 'A':
+                data = ds_A[:]
+            elif type_ == 'V':
+                data = ds_V[:]
+            elif type_ == 'D':
+                data = ds_D[:]
+            else:
+                raise ValueError(f'参数`type_`错误: {type_}')
+            dt = ds_A.attrs['dt']
+            NPTS = ds_A.attrs['NPTS']
+            ds_info = f_info[f'RSN{RSN}']
+            Rjb = ds_info.attrs['Rjb']
+            Rrup = ds_info.attrs['Rrup']
+            Tp = ds_info.attrs['Tp']
+            arias = ds_info.attrs['arias']
+            D_5_75 = ds_info.attrs['duration_5_75']
+            D_5_95 = ds_info.attrs['duration_5_95']
+            duration = ds_info.attrs['duration']
+            earthquake_name = ds_info.attrs['earthquake_name']
+            magnitude = ds_info.attrs['magnitude']
+            mechanism = ds_info.attrs['mechanism']
+            station = ds_info.attrs['station']
+            vs30 = ds_info.attrs['vs30']
+            year = ds_info.attrs['year']
+            SF, error, error_ls = 1, 1, []
+            data_scaled = data
+            if ds_info.attrs['H1_file'] == file_stem:
+                component = 'H1'
+            elif ds_info.attrs['H2_file'] == file_stem:
+                component = 'H2'
+            elif ds_info.attrs['V_file'] == file_stem:
+                component = 'V'
+            else:
+                raise ValueError('【Error】1')
+            line = [i+1, RSN, earthquake_name, component, Rjb, Rrup, Tp, arias,
+                    D_5_75, D_5_95, duration, magnitude, mechanism, station, vs30,
+                    year, PGA, PGV, PGD, dt, NPTS, SF, error, *error_ls]
+            # df_info.loc[len(df_info.index)] = line
+            df_info.iloc[i] = line
+            data_spec = f_spec[file_stem][:]
+            individual_spec = np.column_stack((individual_spec, data_spec))
+            data_scaled_spec = f_spec[file_stem][:] * SF
+            data_spec_sum += data_spec
+            data_scaled_spec_sum += data_scaled_spec
+            df_spec[f'No. {i+1}'] = data_spec
+            earthquake_name_to_file = earthquake_name.replace('/', '_')  # 文件名不得出现"/"、"\"
+            earthquake_name_to_file = earthquake_name_to_file.replace('\\', '_')
+            np.savetxt(output_dir/'未缩放地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data)
+            np.savetxt(output_dir/'归一化地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', cls._normalize(data))
+            np.savetxt(output_dir/'缩放后地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data_scaled)
+            records.individual_spec = individual_spec
+            records._add_record(data, data_spec, SF, dt, type_)
+        print()
+        records.info = df_info
+        records.mean_spec = np.column_stack((T_spec, np.mean(records.individual_spec[:, 1:], axis=1)))
+        df_spec['Mean'] = records.mean_spec[:, 1]
+        df_info.to_csv(output_dir/'地震动信息.csv', index=None)
+        df_spec.to_csv(output_dir/'反应谱.csv', index=False)
+        file_path = output_dir / f'records.opju'
+        with WriteOrigin(op, file_path, 'results') as f_op:
+            print('正在写入origin文件...\r', end='')
+            f_op.delete_obj('Book1')
+            wb1 = op.new_book('w')
+            wb1.lname = '选波信息'
+            ws: originpro.WSheet = wb1[0]
+            ws.from_df(df_info)  # 写入选波信息
+            wb2 = op.new_book('w')
+            wb2.lname = '反应谱'
+            ws: originpro.WSheet = wb2[0]
+            ws.from_list(0, records.individual_spec[:, 0], 'T', 's', axis='X')
+            for col in range(1, records.individual_spec.shape[1]):
+                ws.from_list(col, records.individual_spec[:, col], 'Sa', 'g', axis='Y')
+            ws.from_list(col + 1, records.target_spec[:, 0], 'T', 's', axis='X')
+            ws.from_list(col + 2, records.target_spec[:, 1], 'Sa', 'g', 'Target', axis='Y')  # 写入目标谱
+            ws.from_list(col + 3, records.mean_spec[:, 0], 'T', 's', axis='X')
+            ws.from_list(col + 4, records.mean_spec[:, 1], 'Sa', 'g', 'Mean', axis='Y')  # 写入平均谱
+        print('已导出origin文件          ')
+        selecting_text = f'通过类方法提取地震动\nRSN: {RSN}\nRSN_list: {RSN_list}\nRSN_range: {RSN_range}\ncomponents: {components}\ntype_: {type_}'
+        with open(output_dir/'选波参数设置.txt', 'w') as f:
+            f.write(selecting_text)
+        records.selecting_text = selecting_text  # 记录选波设置文本
+        label = 'Individual'
+        for i in range(N):
+            Sa = individual_spec[:, i + 1]
+            plt.plot(T_spec, Sa, color='#A6A6A6', label=label)
+            if label:
+                label = None
+        plt.plot(T_spec, records.mean_spec[:, 1], color='red', label='Mean', lw=3)
+        plt.xlim(0, 6)
+        plt.title('Selected records')
+        plt.xlabel('T [s]')
+        plt.ylabel('Sa [g]')
+        plt.legend()
+        plt.savefig(output_dir/'反应谱.jpg', dpi=600)
+        plt.show()
+        img = Image.open(output_dir/'反应谱.jpg')
+        records.img = img
+        records._to_pkl('records', output_dir)
+        records.img = None
+        f_info.close()
+        f_spec.close()
+        f_A.close()
+        f_V.close()
+        f_D.close()
+        print('完成！')
+        return records
+
+    @classmethod
+    def check_RSN_exists(cls, RSN: int):
+        if not RSN in cls.RSN_expected:
+            raise ValueError(f'RSN-{RSN}不存在')
+
+    def _extract_one_RSN(self,
+            RSN: int,
+            f_info: h5py.File,
+            component: list[str]=['H1']
+        ) -> list[str]:
         """提取一组RSN"""
         ds_name = f'RSN{RSN}'
         RSN_files = []
         if ds_name not in f_info:
-            self._write(f'【Warning】数据库缺少RSN{RSN}')
-        elif f_info[ds_name].attrs['H1_file'] != '-':
-            RSN_files.append(f_info[ds_name].attrs['H1_file'])
-        elif f_info[ds_name].attrs['H2_file'] != '-':
-            RSN_files.append(f_info[ds_name].attrs['H2_file'])
-        elif f_info[ds_name].attrs['V_file'] != '-':
-            RSN_files.append(f_info[ds_name].attrs['V_file'])
+            if self is not None:
+                self._write(f'【Warning】数据库缺少RSN{RSN}')
+            else:
+                print(f'【Warning】数据库缺少RSN{RSN}')
+            return []
+        if 'H1' in component:
+            if f_info[ds_name].attrs['H1_file'] != '-':
+                RSN_files.append(f_info[ds_name].attrs['H1_file'])
+            else:
+                print(f'【Warning】RSN{RSN}缺少H1分量')
+        if 'H2' in component:
+            if f_info[ds_name].attrs['H2_file'] != '-':
+                RSN_files.append(f_info[ds_name].attrs['H2_file'])
+            else:
+                print(f'【Warning】RSN{RSN}缺少H2分量')
+        if 'V' in component:
+            if f_info[ds_name].attrs['V_file'] != '-':
+                RSN_files.append(f_info[ds_name].attrs['V_file'])
+            else:
+                print(f'【Warning】RSN{RSN}缺少V分量')
         return RSN_files
 
     def _write(self, text: str, end='\n'):
         print(text)
         self.selecting_text += text + end
-
 
     @classmethod
     def _check_file(cls, file_path: str | Path):
