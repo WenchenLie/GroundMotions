@@ -28,7 +28,7 @@ from SeismicUtils.Records import Records
 
 
 class Selecting:
-    version = '2.0'
+    version = '2.2'
     RSN_expected = set([i for i in range(1, 21541)])  # 官网宣称有的RSN（但实际不全）
     df_info_columns = ['No.', 'RSN', 'earthquake_name', 'component', 'Rjb (km)', 'R_rup (km)',
                         'Tp-pluse (s)', 'arias Intensity (m/s)','5-75% Duration (s)',
@@ -130,15 +130,22 @@ class Selecting:
 
     def check_database(self):
         """进行数据库统计"""
-        print('正在统计地震动本地数据库')
+        print('正在统计地震动本地数据库...')
+        if not self:
+            self = Selecting
         if not all([self.file_accec, self.file_vel, self.file_disp,
                     self.file_spec, self.file_info]):
             print('【Warining】请先导入五个hdf5文件')
             return
+        # 版本号
+        f_info = h5py.File(self.file_info, 'r')
+        version = f_info['VERSION'][()].decode('utf-8')
+        print(f'数据库版本：{version}')
         # 检查RSN数量
         RSN_exists = set()
-        f_info = h5py.File(self.file_info, 'r')
         for item in f_info:
+            if item == 'VERSION':
+                continue
             ds = f_info[item]
             RSN_exists.add(ds.attrs['RSN'])
         f_info.close()
@@ -154,7 +161,10 @@ class Selecting:
         print(f'库存地震动：{len(RSN_exists)}组，共{n}条')
         print(f'缺失地震动：{len(RSN_missing)}组')
         print('缺失地震动RSN：')
-        print(RSN_missing)
+        for i in range(0, 999999, 100):
+            print(RSN_missing[i: i + 100])
+            if i + 100 >= len(RSN_missing):
+                break
 
     def target_spectra(self, file: str | Path, plot_spectrum: bool=False, scale: float=1):
         """定义目标谱（两列数据，周期(s)-谱值(g)）
