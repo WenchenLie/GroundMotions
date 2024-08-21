@@ -34,6 +34,11 @@ class Selecting:
                         'Tp-pluse (s)', 'arias Intensity (m/s)','5-75% Duration (s)',
                         '5-95% Duration (s)', 'duration (s)', 'magnitude', 'mechanism', 'station','Vs30 (m/s)',
                         'year', 'PGA (g)', 'PGV (mm/s)', 'PGD (mm)', 'dt', 'NPTS', 'scale factor', 'Norm. error']
+    file_accec = None
+    file_vel = None
+    file_disp = None
+    file_spec = None
+    file_info = None
 
     def __init__(self, output_dir: Path | str):
         """基于NGA West2地震动数据库的选波程序
@@ -42,11 +47,6 @@ class Selecting:
             output_dir (str | Path): 输出文件夹路径
         """
         self.T_spec = np.arange(0, 10.01, 0.01)
-        self.file_accec = None
-        self.file_vel = None
-        self.file_disp = None
-        self.file_spec = None
-        self.file_info = None
         self.T_targ = None
         self.Sa_targ = None
         self.approach = None
@@ -90,24 +90,6 @@ class Selecting:
                 else:
                     print('退出选波')
                     return
-
-    def import_files(self,
-            file_acc: str | Path,
-            file_vel: str | Path,
-            file_disp: str | Path,
-            file_spec: str | Path,
-            file_info: str | Path,
-        ):
-        """导入hdf5文件"""
-        files = [file_acc, file_vel, file_disp, file_spec, file_info]
-        self.file_accec = file_acc
-        self.file_vel = file_vel
-        self.file_disp = file_disp
-        self.file_spec = file_spec
-        self.file_info = file_info
-        for file in files:
-            print(f'正在校验文件 - {file}')
-            self._check_file(file)
 
     @classmethod
     def import_files(cls,
@@ -341,7 +323,10 @@ class Selecting:
             V_file = ds.attrs['V_file']
             RSN = int(ds.attrs['RSN'])
             Rjb = float(ds.attrs['Rjb'])
-            Rrup = float(ds.attrs['Rrup'])
+            try:
+                Rrup = float(ds.attrs['Rrup'])
+            except KeyError:
+                Rrup = float(ds.attrs['Rrub'])
             Tp = ds.attrs['Tp']
             Tp = float(Tp) if type(Tp)==np.float64 else str(Tp)
             arias = ds.attrs['arias']
@@ -355,7 +340,10 @@ class Selecting:
             magnitude = float(ds.attrs['magnitude'])
             mechanism = ds.attrs['mechanism']
             station = ds.attrs['station']
-            vs30 = float(ds.attrs['vs30'])
+            try:
+                vs30 = float(ds.attrs['vs30'])
+            except KeyError:
+                vs30 = float(ds.attrs['v30'])
             year = int(ds.attrs['year'])
             if self.range_magnitude and not self.range_magnitude[0] <= magnitude <= self.range_magnitude[1]:
                 continue
@@ -564,7 +552,7 @@ class Selecting:
         return files_selection, file_SF_error
 
 
-    def extract_records(self, files: list=[], file_SF_error: dict[str, tuple[float, float, list]]={},
+    def get_results(self, files: list=[], file_SF_error: dict[str, tuple[float, float, list]]={},
                         write_unscaled_record: bool=True, write_norm_record: bool=True, write_scaled_records: bool=True):
         """提取地震动数据
 
@@ -623,7 +611,10 @@ class Selecting:
             NPTS = ds_A.attrs['NPTS']
             ds_info = f_info[f'RSN{RSN}']
             Rjb = ds_info.attrs['Rjb']
-            Rrup = ds_info.attrs['Rrup']
+            try:
+                Rrup = ds_info.attrs['Rrup']
+            except KeyError:
+                Rrup = ds_info.attrs['Rrub']
             Tp = ds_info.attrs['Tp']
             arias = ds_info.attrs['arias']
             D_5_75 = ds_info.attrs['duration_5_75']
@@ -633,7 +624,10 @@ class Selecting:
             magnitude = ds_info.attrs['magnitude']
             mechanism = ds_info.attrs['mechanism']
             station = ds_info.attrs['station']
-            vs30 = ds_info.attrs['vs30']
+            try:
+                vs30 = ds_info.attrs['vs30']
+            except KeyError:
+                vs30 = ds_info.attrs['v30']
             year = ds_info.attrs['year']
             if file_stem in file_SF_error.keys():
                 SF, error, error_ls = file_SF_error[file_stem]
@@ -781,7 +775,10 @@ class Selecting:
             NPTS = ds_A.attrs['NPTS']
             ds_info = f_info[f'RSN{RSN}']
             Rjb = ds_info.attrs['Rjb']
-            Rrup = ds_info.attrs['Rrup']
+            try:
+                Rrup = ds_info.attrs['Rrup']
+            except KeyError:
+                Rrup = ds_info.attrs['Rrub']
             Tp = ds_info.attrs['Tp']
             arias = ds_info.attrs['arias']
             D_5_75 = ds_info.attrs['duration_5_75']
@@ -791,7 +788,10 @@ class Selecting:
             magnitude = ds_info.attrs['magnitude']
             mechanism = ds_info.attrs['mechanism']
             station = ds_info.attrs['station']
-            vs30 = ds_info.attrs['vs30']
+            try:
+                vs30 = ds_info.attrs['vs30']
+            except KeyError:
+                vs30 = ds_info.attrs['v30']
             year = ds_info.attrs['year']
             SF, error, error_ls = 1, 1, []
             data_scaled = data
