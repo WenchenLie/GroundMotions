@@ -9,8 +9,8 @@
 更新: 2024.06.23 选波结果写入pickle与origin
 更新：2024.06.28 可调用类方法进行地震动直接提取
 """
-import os
-import sys
+import os, sys
+import json
 import shutil
 from pathlib import Path
 from PIL import Image
@@ -24,7 +24,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
-from SeismicUtils.Records import Records
+from seismicutils import Records
 
 
 class Selecting:
@@ -250,7 +250,7 @@ class Selecting:
 
     def constrain_range(self, scale_factor: tuple=None, PGA: tuple=None, magnitude: tuple=None, Rjb: tuple=None, Rrup: tuple=None,
                         vs30: tuple=None, D5_95: tuple=None, duration: tuple=None, strike_slip: str='all', pulse: str | bool='all',
-                        N_events: int=None, RSN: tuple=None, component: list=['H1', 'H2', 'V']):
+                        N_events: int=None, RSN_bound: tuple=None, component: list=['H1', 'H2', 'V']):
         """定义约束范围
 
         Args:
@@ -275,9 +275,8 @@ class Selecting:
             * [True] 仅脉冲型
             * [False] 仅非脉冲型\n
             N_events (int, optional): 相同地震事件所允许的最大出现次数，默认None   
-            RSN (tuple, optional): RSN，默认None
+            RSN_bound (tuple, optional): RSN范围，默认None
             component (list, optional): 地震动分量，默认['H1', 'H2', 'V']，可根据需要删减列表元素
-
         """
         self.range_scale_factor = scale_factor
         self.range_PGA = PGA
@@ -290,8 +289,8 @@ class Selecting:
         self.range_strike_slip = strike_slip
         self.range_pulse = pulse
         self.range_N_events = N_events
-        if RSN:
-            self.range_RSN = (int(RSN[0]), int(RSN[1]))
+        if RSN_bound:
+            self.range_RSN = (int(RSN_bound[0]), int(RSN_bound[1]))
         self.range_component = component
 
     def run(self, number: int) -> tuple[list[str], dict]:
@@ -597,6 +596,7 @@ class Selecting:
         df_scaled_spec['T (s)'] = self.T_spec
         data_spec_sum = np.zeros(len(self.T_spec))
         data_scaled_spec_sum = np.zeros(len(self.T_spec))
+        dt_info: dict[str, float] = {}  # 时间间隔
         for i, file_stem in enumerate(files):
             print(f'正在写入txt... ({i+1}/{N})\r', end='')
             ds_A = f_A[file_stem + '.AT2']
@@ -646,7 +646,8 @@ class Selecting:
             line = [i+1, RSN, earthquake_name, component, Rjb, Rrup, Tp, arias,
                     D_5_75, D_5_95, duration, magnitude, mechanism, station, vs30,
                     year, PGA, PGV, PGD, dt, NPTS, SF, error, *error_ls]
-            df_info.loc[len(df_info.index)] = line
+            # df_info.loc[len(df_info.index)] = line
+            df_info.loc[i] = line
             data_spec = f_spec[file_stem][:]
             data_scaled_spec = f_spec[file_stem][:] * SF
             data_spec_sum += data_spec
@@ -655,15 +656,15 @@ class Selecting:
             df_scaled_spec[f'No. {i+1}'] = data_scaled_spec
             earthquake_name_to_file = earthquake_name.replace('/', '_')  # 文件名不得出现"/"、"\"
             earthquake_name_to_file = earthquake_name_to_file.replace('\\', '_')
+            dt_info[f'No{i+1}'] = dt
             if write_unscaled_record:
-                np.savetxt(output_dir/'未缩放地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data)
+                np.savetxt(output_dir/'未缩放地震动'/f'No{i+1}.txt', data)
             if write_norm_record:
-                np.savetxt(output_dir/'归一化地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', self._normalize(data))
+                np.savetxt(output_dir/'归一化地震动'/f'No{i+1}.txt', self._normalize(data))
             if write_scaled_records:
-                np.savetxt(output_dir/'缩放后地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data_scaled)
+                np.savetxt(output_dir/'缩放后地震动'/f'No{i+1}.txt', data_scaled)
             records._add_record(data, data_spec, SF, dt, 'A')
-        print()
-        records.info = df_info
+        records.info = df_info.copy()
         data_spec_mean = data_spec_sum / len(files)
         data_scaled_spec_mean = data_scaled_spec_sum / len(files)
         df_spec['Mean'] = data_spec_mean
@@ -671,6 +672,7 @@ class Selecting:
         df_info.to_csv(output_dir/'地震动信息.csv', index=None)
         df_spec.to_csv(output_dir/'未缩放反应谱.csv', index=False)
         df_scaled_spec.to_csv(output_dir/'缩放后反应谱.csv', index=False)
+        json.dump(dt_info, open(output_dir/'GM_info.json', 'w'), indent=4)
         file_path = output_dir / f'records.opju'
         with WriteOrigin(op, file_path, 'results') as f_op:
             print('正在写入origin文件...\r', end='')
@@ -754,6 +756,7 @@ class Selecting:
         cls._new_folder(output_dir/'未缩放地震动')
         cls._new_folder(output_dir/'归一化地震动')
         cls._new_folder(output_dir/'缩放后地震动')
+        dt_info: dict[str, float] = {}  # 时间间隔
         for i, file_stem in enumerate(file_name):
             print(f'正在写入txt... ({i+1}/{N})\r', end='')
             ds_A = f_A[file_stem + '.AT2']
@@ -816,9 +819,10 @@ class Selecting:
             df_spec[f'No. {i+1}'] = data_spec
             earthquake_name_to_file = earthquake_name.replace('/', '_')  # 文件名不得出现"/"、"\"
             earthquake_name_to_file = earthquake_name_to_file.replace('\\', '_')
-            np.savetxt(output_dir/'未缩放地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data)
-            np.savetxt(output_dir/'归一化地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', cls._normalize(data))
-            np.savetxt(output_dir/'缩放后地震动'/f'No{i+1}_RSN{RSN}_{earthquake_name_to_file}_{NPTS}_{dt}.txt', data_scaled)
+            dt_info[f'No{i+1}'] = dt
+            np.savetxt(output_dir/'未缩放地震动'/f'No{i+1}.txt', data)
+            np.savetxt(output_dir/'归一化地震动'/f'No{i+1}.txt', cls._normalize(data))
+            np.savetxt(output_dir/'缩放后地震动'/f'No{i+1}.txt', data_scaled)
             records.individual_spec = individual_spec
             records._add_record(data, data_spec, SF, dt, type_)
         print()
@@ -827,6 +831,7 @@ class Selecting:
         df_spec['Mean'] = records.mean_spec[:, 1]
         df_info.to_csv(output_dir/'地震动信息.csv', index=None)
         df_spec.to_csv(output_dir/'反应谱.csv', index=False)
+        json.dump(dt_info, open(output_dir/'GM_info.json', 'w'), indent=4)
         file_path = output_dir / f'records.opju'
         with WriteOrigin(op, file_path, 'results') as f_op:
             print('正在写入origin文件...\r', end='')
@@ -895,21 +900,28 @@ class Selecting:
             else:
                 print(f'【Warning】数据库缺少RSN{RSN}')
             return []
-        if 'H1' in component:
-            if f_info[ds_name].attrs['H1_file'] != '-':
-                RSN_files.append(f_info[ds_name].attrs['H1_file'])
-            else:
-                print(f'【Warning】RSN{RSN}缺少H1分量')
-        if 'H2' in component:
-            if f_info[ds_name].attrs['H2_file'] != '-':
-                RSN_files.append(f_info[ds_name].attrs['H2_file'])
-            else:
-                print(f'【Warning】RSN{RSN}缺少H2分量')
-        if 'V' in component:
-            if f_info[ds_name].attrs['V_file'] != '-':
-                RSN_files.append(f_info[ds_name].attrs['V_file'])
-            else:
-                print(f'【Warning】RSN{RSN}缺少V分量')
+        # if 'H1' in component:
+        #     if f_info[ds_name].attrs['H1_file'] != '-':
+        #         RSN_files.append(f_info[ds_name].attrs['H1_file'])
+        #     else:
+        #         print(f'【Warning】RSN{RSN}缺少H1分量')
+        # if 'H2' in component:
+        #     if f_info[ds_name].attrs['H2_file'] != '-':
+        #         RSN_files.append(f_info[ds_name].attrs['H2_file'])
+        #     else:
+        #         print(f'【Warning】RSN{RSN}缺少H2分量')
+        # if 'V' in component:
+        #     if f_info[ds_name].attrs['V_file'] != '-':
+        #         RSN_files.append(f_info[ds_name].attrs['V_file'])
+        #     else:
+        #         print(f'【Warning】RSN{RSN}缺少V分量')
+        import random
+        idx = random.randint(0, 1)
+        comp = ['H1_file', 'H2_file']
+        if f_info[ds_name].attrs[comp[idx]] != '-':
+            RSN_files.append(f_info[ds_name].attrs[comp[idx]])
+        else:
+            print(f'【Warning】RSN{RSN}缺少H1分量') 
         return RSN_files
 
     def _write(self, text: str, end='\n'):

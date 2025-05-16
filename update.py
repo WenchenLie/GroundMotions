@@ -6,7 +6,7 @@ import h5py
 import dill as pickle
 import numpy as np
 import matplotlib.pyplot as plt
-from SeismicUtils.Spectrum import spectrum
+from seismicutils.spectrum import spectrum
 
 
 def _get_version(file_info: str | Path):
