@@ -900,28 +900,21 @@ class Selecting:
             else:
                 print(f'【Warning】数据库缺少RSN{RSN}')
             return []
-        # if 'H1' in component:
-        #     if f_info[ds_name].attrs['H1_file'] != '-':
-        #         RSN_files.append(f_info[ds_name].attrs['H1_file'])
-        #     else:
-        #         print(f'【Warning】RSN{RSN}缺少H1分量')
-        # if 'H2' in component:
-        #     if f_info[ds_name].attrs['H2_file'] != '-':
-        #         RSN_files.append(f_info[ds_name].attrs['H2_file'])
-        #     else:
-        #         print(f'【Warning】RSN{RSN}缺少H2分量')
-        # if 'V' in component:
-        #     if f_info[ds_name].attrs['V_file'] != '-':
-        #         RSN_files.append(f_info[ds_name].attrs['V_file'])
-        #     else:
-        #         print(f'【Warning】RSN{RSN}缺少V分量')
-        import random
-        idx = random.randint(0, 1)
-        comp = ['H1_file', 'H2_file']
-        if f_info[ds_name].attrs[comp[idx]] != '-':
-            RSN_files.append(f_info[ds_name].attrs[comp[idx]])
-        else:
-            print(f'【Warning】RSN{RSN}缺少H1分量') 
+        if 'H1' in component:
+            if f_info[ds_name].attrs['H1_file'] != '-':
+                RSN_files.append(f_info[ds_name].attrs['H1_file'])
+            else:
+                print(f'【Warning】RSN{RSN}缺少H1分量')
+        if 'H2' in component:
+            if f_info[ds_name].attrs['H2_file'] != '-':
+                RSN_files.append(f_info[ds_name].attrs['H2_file'])
+            else:
+                print(f'【Warning】RSN{RSN}缺少H2分量')
+        if 'V' in component:
+            if f_info[ds_name].attrs['V_file'] != '-':
+                RSN_files.append(f_info[ds_name].attrs['V_file'])
+            else:
+                print(f'【Warning】RSN{RSN}缺少V分量')
         return RSN_files
 
     def _write(self, text: str, end='\n'):
